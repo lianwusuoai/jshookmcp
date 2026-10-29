@@ -67,7 +67,7 @@ export const transformTools: Tool[] = [
   tool('crypto_test_harness', (t) =>
     t
       .desc(
-        'Run extracted crypto code in worker_threads + vm sandbox and return deterministic test results.',
+        'Run extracted crypto code in a QuickJS WebAssembly sandbox inside a worker thread. Returns deterministic results. The compatibility shim provides Buffer.from, alloc, allocUnsafe, concat, isBuffer, isEncoding, byteLength, plus instance toString, slice, subarray, write, copy, and equals for utf8, hex, base64, base64url, latin1/binary, ascii, and utf16le/ucs2. Node APIs, timers, and external I/O are unavailable.',
       )
       .string('code', 'Standalone function code.')
       .string('functionName', 'Exported function name to execute.')

@@ -27,6 +27,6 @@ AST/string transform domain plus crypto extraction, harnessing, and comparison t
 | `ast_transform_apply` | Apply transforms to input code or a live page scriptId. |
 | `ast_transform_beautify` | Pretty-print minified or obfuscated JavaScript: re-emit the parsed source with standard 2-space indentation and normalised spacing. Formatting only — the AST is preserved, so program semantics do not change. Unparseable input is returned unchanged. |
 | `crypto_extract_standalone` | Extract crypto/sign/encrypt function from current page and generate standalone runnable code. |
-| `crypto_test_harness` | Run extracted crypto code in worker_threads + vm sandbox and return deterministic test results. |
+| `crypto_test_harness` | Run extracted crypto code in a QuickJS WebAssembly sandbox inside a worker thread. Returns deterministic results. The compatibility shim provides Buffer.from, alloc, allocUnsafe, concat, isBuffer, isEncoding, byteLength, plus instance toString, slice, subarray, write, copy, and equals for utf8, hex, base64, base64url, latin1/binary, ascii, and utf16le/ucs2. Node APIs, timers, and external I/O are unavailable. |
 | `crypto_compare` | Compare two crypto implementations against identical test vectors. |
 | `transform_workbench` | Run a reproducible binary transform workbench over base64 inputs: base64, hex, XOR, RC4, AES-CBC/ECB decrypt, zlib/gzip inflate, entropy, previews, and magic hints. |

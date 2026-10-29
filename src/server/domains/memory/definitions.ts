@@ -314,8 +314,9 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           `Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) ` +
           `and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). ` +
           `VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. ` +
-          `Conditional breakpoints: pass a JS expression as "condition" (e.g. "rax > 0x1000"), evaluated against ` +
-          `register context on each hit; falsy results auto-resume without reporting.`,
+          `Trace conditions use a restricted register-expression grammar (e.g. "rax > 0x1000 && rcx == 5"). ` +
+          `Only register aliases, boolean/numeric/BigInt literals, and arithmetic, comparison, bitwise, and logical operators are allowed; ` +
+          `calls, member access, assignments, and global identifiers are rejected.`,
       )
       .enum('action', ['set', 'remove', 'list', 'trace'], 'Breakpoint operation')
       .enum(
@@ -336,8 +337,9 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .number('timeoutMs', 'Timeout ms (action=trace, default: 10000)')
       .string(
         'condition',
-        'JS expression evaluated against register context on each hit (e.g. "rax > 0x1000 && ecx == 5"). ' +
-          'Falsy results auto-resume without reporting. Register aliases: rax/rbx/rcx/rdx/rsi/rdi/rsp/rbp/rip/rflags and ' +
+        'Restricted expression used to filter trace hits (e.g. "rax > 0x1000 && ecx == 5"). ' +
+          'Only register aliases, boolean/numeric/BigInt literals, and arithmetic, comparison, bitwise, and logical operators are allowed; ' +
+          'calls, member access, assignments, and global identifiers are rejected. Register aliases: rax/rbx/rcx/rdx/rsi/rdi/rsp/rbp/rip/rflags and ' +
           'x86-32 names (eax/ebx/ecx/edx/esi/edi/esp/ebp/eip/eflags). Use BigInt n-suffix for bitwise ops on rflags.',
       )
       .enum(

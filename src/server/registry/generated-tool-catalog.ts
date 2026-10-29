@@ -5815,7 +5815,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'crypto_test_harness',
       description:
-        'Run extracted crypto code in worker_threads + vm sandbox and return deterministic test results.',
+        'Run extracted crypto code in a QuickJS WebAssembly sandbox inside a worker thread. Returns deterministic results. The compatibility shim provides Buffer.from, alloc, allocUnsafe, concat, isBuffer, isEncoding, byteLength, plus instance toString, slice, subarray, write, copy, and equals for utf8, hex, base64, base64url, latin1/binary, ascii, and utf16le/ucs2. Node APIs, timers, and external I/O are unavailable.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -13252,7 +13252,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'memory_breakpoint',
       description:
-        'Breakpoint via hardware debug registers (DR0-DR3) or software INT3 (0xCC). Actions: set, remove, list, trace. Hardware BPs (type=\'hardware\'): use x64 DR0-DR3, max 4 concurrent, support read/write/readwrite/execute. Software BPs (type=\'software\'): use INT3 (0xCC) patching, unlimited count, execute-only. Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. Conditional breakpoints: pass a JS expression as "condition" (e.g. "rax > 0x1000"), evaluated against register context on each hit; falsy results auto-resume without reporting.',
+        'Breakpoint via hardware debug registers (DR0-DR3) or software INT3 (0xCC). Actions: set, remove, list, trace. Hardware BPs (type=\'hardware\'): use x64 DR0-DR3, max 4 concurrent, support read/write/readwrite/execute. Software BPs (type=\'software\'): use INT3 (0xCC) patching, unlimited count, execute-only. Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. Trace conditions use a restricted register-expression grammar (e.g. "rax > 0x1000 && rcx == 5"). Only register aliases, boolean/numeric/BigInt literals, and arithmetic, comparison, bitwise, and logical operators are allowed; calls, member access, assignments, and global identifiers are rejected.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -13301,7 +13301,7 @@ export const GENERATED_TOOL_CATALOG = [
           condition: {
             type: 'string',
             description:
-              'JS expression evaluated against register context on each hit (e.g. "rax > 0x1000 && ecx == 5"). Falsy results auto-resume without reporting. Register aliases: rax/rbx/rcx/rdx/rsi/rdi/rsp/rbp/rip/rflags and x86-32 names (eax/ebx/ecx/edx/esi/edi/esp/ebp/eip/eflags). Use BigInt n-suffix for bitwise ops on rflags.',
+              'Restricted expression used to filter trace hits (e.g. "rax > 0x1000 && ecx == 5"). Only register aliases, boolean/numeric/BigInt literals, and arithmetic, comparison, bitwise, and logical operators are allowed; calls, member access, assignments, and global identifiers are rejected. Register aliases: rax/rbx/rcx/rdx/rsi/rdi/rsp/rbp/rip/rflags and x86-32 names (eax/ebx/ecx/edx/esi/edi/esp/ebp/eip/eflags). Use BigInt n-suffix for bitwise ops on rflags.',
           },
           debuggerMode: {
             type: 'string',
