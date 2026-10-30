@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
+// getCoverageSummary's callers resolve catalog tool names from ToolCatalog,
+// which requires an initialised registry; these tests run without one and the
+// mocked getCoverageSummary ignores the argument anyway.
+vi.mock('@server/ToolCatalog', () => ({ allTools: [] }));
+
 import { registerServerResources } from '@server/MCPServer.resources';
 
 type ResourceHandler = (

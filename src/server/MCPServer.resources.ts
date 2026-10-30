@@ -4,6 +4,7 @@ import type { ReverseEvidenceGraph } from '@server/evidence/ReverseEvidenceGraph
 import type { InstrumentationSessionManager } from '@server/instrumentation/InstrumentationSession';
 import type { TabRegistry } from '@modules/browser/TabRegistry';
 import { getAllRegistrations, getAllKnownDomains } from '@server/registry/index';
+import { allTools as allCatalogTools } from '@server/ToolCatalog';
 import { getSearchEngine } from '@server/MCPServer.search.helpers';
 import { getRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { getEmbeddingDimensionHint } from '@server/search/EmbeddingModels';
@@ -251,7 +252,12 @@ export function registerServerResources(ctx: MCPServerContext): void {
     },
     async (uri) => {
       const runtimeState = getRuntimeState(ctx);
-      const summary = runtimeState?.getCoverageSummary(ctx) ?? {
+      // Argument evaluated lazily: allTools touches the registry, which may be
+      // uninitialised when no runtime state exists.
+      const summary = runtimeState?.getCoverageSummary(
+        ctx,
+        allCatalogTools.map((tool) => tool.name),
+      ) ?? {
         called: {},
         calledCount: 0,
         uncataloguedCalls: [],

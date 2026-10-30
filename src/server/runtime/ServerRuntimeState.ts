@@ -1,6 +1,4 @@
 import type { MCPServerContext } from '@server/MCPServer.context';
-import { allTools } from '@server/ToolCatalog';
-import { logger } from '@utils/logger';
 
 export interface BrowserAttachRuntimeSnapshot {
   endpoint: string | null;
@@ -242,7 +240,10 @@ export class ServerRuntimeState {
     this.noteDirty();
   }
 
-  getCoverageSummary(ctx: MCPServerContext): {
+  getCoverageSummary(
+    ctx: MCPServerContext,
+    catalogToolNames: Iterable<string>,
+  ): {
     called: Record<string, ToolCoverageEntry>;
     calledCount: number;
     uncataloguedCalls: string[];
@@ -258,7 +259,7 @@ export class ServerRuntimeState {
     );
 
     const knownTools = new Set<string>([
-      ...allTools.map((tool) => tool.name),
+      ...catalogToolNames,
       ...ctx.selectedTools.map((tool) => tool.name),
       ...ctx.activatedToolNames,
       ...ctx.extensionToolsByName.keys(),
@@ -289,33 +290,4 @@ export function getRuntimeState(ctx: MCPServerContext): ServerRuntimeState | nul
     return null;
   }
   return ctx.getDomainInstance<ServerRuntimeState>('serverRuntimeState') ?? null;
-}
-
-export async function restorePendingDomainActivations(ctx: MCPServerContext): Promise<void> {
-  const runtimeState = getRuntimeState(ctx);
-  if (!runtimeState) {
-    return;
-  }
-
-  const pendingDomains = runtimeState.getPendingActivatedDomains();
-  if (pendingDomains.length === 0) {
-    return;
-  }
-
-  for (const domain of pendingDomains) {
-    if (ctx.enabledDomains.has(domain) && ctx.domainTtlEntries.has(domain)) {
-      continue;
-    }
-
-    try {
-      const { handleActivateDomain } = await import('@server/MCPServer.search.handlers.domain');
-      const ttlEntry = runtimeState.getPendingDomainTtl(domain);
-      await handleActivateDomain(ctx, {
-        domain,
-        ...(ttlEntry ? { ttlMinutes: ttlEntry.ttlMinutes } : {}),
-      });
-    } catch (error) {
-      logger.warn(`Failed to restore activated domain "${domain}":`, error);
-    }
-  }
 }

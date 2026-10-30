@@ -24,6 +24,7 @@ import { asErrorResponse } from '@server/domains/shared/response';
 import type { MCPServerContext } from '@server/MCPServer.context';
 import { getAllDomains } from '@server/registry/index';
 import { buildZodShape } from '@server/MCPServer.schema';
+import { allTools } from '@server/ToolCatalog';
 import { z } from 'zod';
 import type { ToolResponse } from '@server/types';
 
@@ -82,7 +83,10 @@ async function handleCoverageReport(
 ): Promise<ToolResponse> {
   await ensureAllDomainsLoaded(ctx.eventBus);
   const runtimeState = getRuntimeState(ctx);
-  const summary = runtimeState?.getCoverageSummary(ctx) ?? {
+  const summary = runtimeState?.getCoverageSummary(
+    ctx,
+    allTools.map((tool) => tool.name),
+  ) ?? {
     called: {},
     calledCount: 0,
     uncataloguedCalls: [],

@@ -58,11 +58,9 @@ import {
   RuntimeSnapshotScheduler,
   getStateDir,
 } from '@server/persistence/RuntimeSnapshotScheduler';
-import {
-  ServerRuntimeState,
-  restorePendingDomainActivations,
-} from '@server/runtime/ServerRuntimeState';
+import { ServerRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { BrowserSessionCoordinator } from '@server/runtime/BrowserSessionCoordinator';
+import { restorePendingDomainActivations } from '@server/runtime/restorePendingDomainActivations';
 import {
   BrowserFleetRouter,
   getConfiguredBrowserFleetLeaseStore,
