@@ -1060,7 +1060,12 @@ export function getEtwMonitoringSummary(): {
   if (process.platform === 'win32') {
     try {
       const { execSync } = require('node:child_process');
-      const whoami = execSync('whoami /priv', {
+      // Absolute path: on hosts with MSYS/Git-Bash on PATH, a bare `whoami`
+      // resolves to /usr/bin/whoami, which rejects the `/priv` flag ("extra
+      // operand") and the probe silently reads as non-admin. SystemRoot
+      // fallback mirrors SyscallResolver's ntdll resolution.
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+      const whoami = execSync(`"${systemRoot}\\System32\\whoami.exe" /priv`, {
         timeout: 5000,
         encoding: 'utf8',
         windowsHide: true,
