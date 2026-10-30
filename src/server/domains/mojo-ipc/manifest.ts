@@ -1,7 +1,7 @@
 import type { DomainManifest, MCPServerContext } from '@server/domains/shared/registry';
 import { defineMethodRegistrations, toolLookup } from '@server/domains/shared/registry';
 import { mojoIpcTools } from './definitions';
-import type { MojoIPCHandlers } from './index';
+import type { MojoIPCHandlers } from './handlers.impl';
 
 const DOMAIN = 'mojo-ipc' as const;
 const DEP_KEY = 'mojoIpcHandlers' as const;
@@ -25,7 +25,7 @@ const registrations = defineMethodRegistrations<H, (typeof mojoIpcTools)[number]
 });
 
 async function ensure(ctx: MCPServerContext): Promise<H> {
-  const { MojoIPCHandlers } = await import('./index');
+  const { MojoIPCHandlers } = await import('./handlers.impl');
   const existingHandlers = ctx.getDomainInstance<H>(DEP_KEY);
   if (existingHandlers) {
     return existingHandlers;

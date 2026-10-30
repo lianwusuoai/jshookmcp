@@ -833,6 +833,52 @@ export function decodeEscapedString(value: string): string {
     .replace(/\\\\/g, '\\');
 }
 
+/**
+ * Page-side script-source resolver, executed via page.evaluate. Must stay
+ * closure-free: Playwright/CDP serializes the function source, so it may only
+ * touch its own parameter and browser globals.
+ */
+async function fetchPageScriptSource(id: string): Promise<string> {
+  // Must live inside the serialized page callback — the browser, not Node,
+  // executes it.
+  // oxlint-disable-next-line unicorn/consistent-function-scoping
+  async function fetchScriptText(src: string): Promise<string> {
+    try {
+      const r = await fetch(src);
+      return r.ok ? await r.text() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  const scripts = Array.from(document.scripts) as HTMLScriptElement[];
+  const byNumericIndex = Number(id);
+  if (Number.isInteger(byNumericIndex) && byNumericIndex >= 0 && byNumericIndex < scripts.length) {
+    const script = scripts[byNumericIndex];
+    if (script) {
+      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
+      if (script.src) {
+        const text = await fetchScriptText(script.src);
+        if (text) return text;
+      }
+    }
+  }
+  for (const script of scripts) {
+    if (script.id === id || script.dataset?.scriptId === id) {
+      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
+      if (script.src) {
+        const text = await fetchScriptText(script.src);
+        if (text) return text;
+      }
+    }
+    if (script.src && script.src.includes(id)) {
+      const text = await fetchScriptText(script.src);
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
 export async function resolveScriptSource(
   collector: CodeCollector,
   scriptId: string,
@@ -858,42 +904,7 @@ export async function resolveScriptSource(
   if (fromCache?.content && fromCache.content.length > 0) return fromCache.content;
 
   const page = await collector.getActivePage();
-  const pageSource = await page.evaluate(async (id: string): Promise<string> => {
-    const scripts = Array.from(document.scripts);
-    const byNumericIndex = Number(id);
-    if (
-      Number.isInteger(byNumericIndex) &&
-      byNumericIndex >= 0 &&
-      byNumericIndex < scripts.length
-    ) {
-      const script = scripts[byNumericIndex] as HTMLScriptElement;
-      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
-      if (script.src) {
-        try {
-          const r = await fetch(script.src);
-          if (r.ok) return await r.text();
-        } catch {}
-      }
-    }
-    for (const script of scripts as HTMLScriptElement[]) {
-      if (script.id === id || script.dataset?.scriptId === id) {
-        if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
-        if (script.src) {
-          try {
-            const r = await fetch(script.src);
-            if (r.ok) return await r.text();
-          } catch {}
-        }
-      }
-      if (script.src && script.src.includes(id)) {
-        try {
-          const r = await fetch(script.src);
-          if (r.ok) return await r.text();
-        } catch {}
-      }
-    }
-    return '';
-  }, scriptId);
+  const pageSource = await page.evaluate(fetchPageScriptSource, scriptId);
 
   if (typeof pageSource === 'string' && pageSource.length > 0) return pageSource;
   throw new Error(`Unable to resolve source from scriptId: ${scriptId}`);

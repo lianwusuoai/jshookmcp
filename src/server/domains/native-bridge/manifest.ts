@@ -1,7 +1,7 @@
 import type { DomainManifest, MCPServerContext } from '@server/domains/shared/registry';
 import { defineMethodRegistrations, toolLookup } from '@server/domains/shared/registry';
 import { nativeBridgeTools } from './definitions';
-import type { NativeBridgeHandlers } from './index';
+import type { NativeBridgeHandlers } from './handlers.impl';
 
 const DOMAIN = 'native-bridge' as const;
 const DEP_KEY = 'nativeBridgeHandlers' as const;
@@ -23,7 +23,7 @@ const registrations = defineMethodRegistrations<H, (typeof nativeBridgeTools)[nu
 });
 
 async function ensure(ctx: MCPServerContext): Promise<H> {
-  const { NativeBridgeHandlers } = await import('./index');
+  const { NativeBridgeHandlers } = await import('./handlers.impl');
   const existingHandlers = ctx.getDomainInstance<H>(DEP_KEY);
   if (existingHandlers) {
     return existingHandlers;

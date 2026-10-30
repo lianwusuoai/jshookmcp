@@ -258,6 +258,8 @@ function createSpawnReadyGuard<TProcess extends ChildProcess>(
       return;
     }
     settled = true;
+    // Best-effort kill: if terminate() throws (process already dead, platform
+    // lacks the kill path), the timeout rejection below is the real signal.
     try {
       terminate?.();
     } catch {}
