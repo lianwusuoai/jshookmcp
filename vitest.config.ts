@@ -289,6 +289,12 @@ export default defineConfig({
         test: {
           name: 'pure',
           pool: 'forks', // Use forks because pure tests might load better-sqlite3 via cache utils
+          // No test in this project mutates module state across files (no
+          // module mocking of shared singletons, no registry mutation), so
+          // sharing the module graph across files within one fork is safe and
+          // removes ~80 cold module-graph imports. Revert to isolated if a
+          // future test adds cross-file module mock leakage.
+          isolate: false,
           include: [
             'tests/utils/**/*.test.ts',
             'tests/errors/**/*.test.ts',
