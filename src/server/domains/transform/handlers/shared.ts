@@ -60,18 +60,6 @@ export interface CryptoExtractResult {
   dependencySnippets: string[];
 }
 
-export const SUPPORTED_TRANSFORM_SET: ReadonlySet<string> = new Set(SUPPORTED_TRANSFORMS);
-
-export const NUMERIC_BINARY_EXPR = /\b(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)\b/g;
-export const STRING_CONCAT_EXPR =
-  /(['"])((?:\\.|(?!\1)[^\\])*)\1\s*\+\s*(['"])((?:\\.|(?!\3)[^\\])*)\3/g;
-export const STRING_LITERAL_EXPR = /(['"])((?:\\.|(?!\1)[^\\])*)\1/g;
-export const DEAD_CODE_IF_FALSE_WITH_ELSE =
-  /if\s*\(\s*(?:false|0|!0\s*===\s*!1)\s*\)\s*\{([\s\S]*?)\}\s*else\s*\{([\s\S]*?)\}/g;
-export const DEAD_CODE_IF_FALSE = /if\s*\(\s*(?:false|0|!0\s*===\s*!1)\s*\)\s*\{[\s\S]*?\}/g;
-
-export const WORKER_TIMEOUT_MS = TRANSFORM_WORKER_TIMEOUT_MS;
-
 export const TransformLimit = {
   MAX_LCS_CELLS: 250000,
 } as const;
@@ -96,7 +84,7 @@ const QUICKJS_MODULE_URL = import.meta.resolve('quickjs-emscripten');
 const QUICKJS_MEMORY_LIMIT_BYTES = TRANSFORM_CRYPTO_POOL_MAX_OLD_GEN_MB * 1024 * 1024;
 // Keep below QuickJS's fixed WebAssembly stack so evaluation cannot overflow it.
 const QUICKJS_STACK_LIMIT_BYTES = 1 * 1024 * 1024;
-const QUICKJS_TIMEOUT_MS = Math.max(1000, WORKER_TIMEOUT_MS - 1000);
+const QUICKJS_TIMEOUT_MS = Math.max(1000, TRANSFORM_WORKER_TIMEOUT_MS - 1000);
 
 /**
  * Pure JavaScript compatibility layer evaluated inside QuickJS.
@@ -768,7 +756,8 @@ export function parseTransforms(raw: unknown): TransformKind[] {
   const unique: TransformKind[] = [];
   const seen = new Set<string>();
   for (const value of values) {
-    if (!SUPPORTED_TRANSFORM_SET.has(value)) throw new Error(`Unsupported transform: ${value}`);
+    if (!SUPPORTED_TRANSFORMS.includes(value as never))
+      throw new Error(`Unsupported transform: ${value}`);
     if (!seen.has(value)) {
       seen.add(value);
       unique.push(value as TransformKind);
@@ -802,17 +791,6 @@ export function requireString(raw: unknown, field: string): string {
   if (typeof raw !== 'string' || raw.length === 0)
     throw new Error(`${field} must be a non-empty string`);
   return raw;
-}
-
-export function escapeStringContent(value: string, quote: string): string {
-  const escapedBackslash = value.replace(/\\/g, '\\\\');
-  const escapedControls = escapedBackslash
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n')
-    .replace(/\t/g, '\\t');
-  return quote === '"'
-    ? escapedControls.replace(/"/g, '\\"')
-    : escapedControls.replace(/'/g, "\\'");
 }
 
 export function decodeEscapedString(value: string): string {
@@ -930,7 +908,7 @@ export function resolveFunctionName(
   return 'extractedCryptoFn';
 }
 
-export function isValidIdentifier(value: string): boolean {
+function isValidIdentifier(value: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
 }
 
@@ -964,7 +942,7 @@ export async function runCryptoHarness(
   try {
     const msg = await pool.submit(
       { code, functionName, testInputs } as unknown as Record<string, unknown>,
-      WORKER_TIMEOUT_MS,
+      TRANSFORM_WORKER_TIMEOUT_MS,
     );
     if (!msg.ok)
       return {
