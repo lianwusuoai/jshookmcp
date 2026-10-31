@@ -102,8 +102,10 @@ const BASE64_DECODE_MAP: ReadonlyMap<string, number> = new Map(
 // ── VLQ decoding ──
 
 export function fromVlqSigned(value: number): number {
-  const isNegative = (value & 1) === 1;
-  const shifted = value >> 1;
+  // Arithmetic (not bitwise) so 32-bit boundary values survive: `>> 1` would overflow
+  // past 2^31 and corrupt legal tc39 boundary mappings into negatives.
+  const isNegative = value % 2 === 1;
+  const shifted = (value - (isNegative ? 1 : 0)) / 2;
   return isNegative ? -shifted : shifted;
 }
 
@@ -123,7 +125,9 @@ export function decodeVlqSegment(segment: string): number[] {
         throw new Error(`Invalid VLQ base64 char "${char}" in segment "${segment}"`);
       continuation = (digit & VlqConstant.CONTINUATION_BIT) !== 0;
       const digitValue = digit & VlqConstant.BASE_MASK;
-      result += digitValue << shift;
+      // Accumulate with multiplication: `<<` silently overflows past shift 30, but the
+      // spec allows 32-bit boundary values (tc39 valid-mapping-boundary-values).
+      result += digitValue * 2 ** shift;
       shift += VlqConstant.BASE_SHIFT;
     }
     values.push(fromVlqSigned(result));
@@ -155,13 +159,50 @@ export function decodeVlqSegmentUnsigned(segment: string): number[] {
   return values;
 }
 
+/**
+ * ECMA-426 conformance (tc39/source-map-tests) validation for one decoded segment:
+ * absolute positions must never go negative, segment field count must be 1/4/5, and
+ * the running deltas are folded into `state`.
+ */
+function buildValidatedMapping(
+  segment: string,
+  lineIndex: number,
+  generatedColumn: number,
+  values: number[],
+  state: { source: number; originalLine: number; originalColumn: number; name: number },
+): DecodedMapping {
+  const where = (reason: string): Error =>
+    new Error(
+      `invalid mappings segment "${segment}" on generated line ${lineIndex + 1}: ${reason}`,
+    );
+  if (generatedColumn < 0) throw where(`generated column ${generatedColumn} is negative`);
+  if (values.length === 2 || values.length === 3) {
+    throw where(`${values.length} fields (must be 1, 4, or 5)`);
+  }
+  const mapping: DecodedMapping = { generatedLine: lineIndex + 1, generatedColumn };
+  if (values.length >= 4) {
+    state.source += values[1] ?? 0;
+    state.originalLine += values[2] ?? 0;
+    state.originalColumn += values[3] ?? 0;
+    if (state.source < 0 || state.originalLine < 0 || state.originalColumn < 0) {
+      throw where('negative source/line/column after delta decoding');
+    }
+    mapping.sourceIndex = state.source;
+    mapping.originalLine = state.originalLine + 1;
+    mapping.originalColumn = state.originalColumn;
+    if (values.length >= 5) {
+      state.name += values[4] ?? 0;
+      if (state.name < 0) throw where(`name index ${state.name} is negative`);
+      mapping.nameIndex = state.name;
+    }
+  }
+  return mapping;
+}
+
 export function decodeMappings(mappings: string): DecodedMapping[] {
   if (!mappings) return [];
   const decoded: DecodedMapping[] = [];
-  let previousSource = 0;
-  let previousOriginalLine = 0;
-  let previousOriginalColumn = 0;
-  let previousName = 0;
+  const running = { source: 0, originalLine: 0, originalColumn: 0, name: 0 };
   const lines = mappings.split(';');
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex] ?? '';
@@ -174,20 +215,7 @@ export function decodeMappings(mappings: string): DecodedMapping[] {
       const generatedDelta = values[0];
       if (generatedDelta === undefined) continue;
       generatedColumn += generatedDelta;
-      const mapping: DecodedMapping = { generatedLine: lineIndex + 1, generatedColumn };
-      if (values.length >= 4) {
-        previousSource += values[1] ?? 0;
-        previousOriginalLine += values[2] ?? 0;
-        previousOriginalColumn += values[3] ?? 0;
-        mapping.sourceIndex = previousSource;
-        mapping.originalLine = previousOriginalLine + 1;
-        mapping.originalColumn = previousOriginalColumn;
-        if (values.length >= 5) {
-          previousName += values[4] ?? 0;
-          mapping.nameIndex = previousName;
-        }
-      }
-      decoded.push(mapping);
+      decoded.push(buildValidatedMapping(segment, lineIndex, generatedColumn, values, running));
     }
   }
   return decoded;

@@ -139,29 +139,67 @@ export class SourcemapToolHandlersParseBase {
     if (versionRaw !== 3) {
       throw new Error('Only SourceMap version 3 is supported');
     }
-
     const mappings = this.asString(record.mappings);
     if (mappings === undefined) {
       throw new Error('SourceMap.mappings is required');
     }
+    if (!Array.isArray(record.sources)) {
+      throw new Error('SourceMap.sources must be an array');
+    }
+    if (record.names !== undefined && !Array.isArray(record.names)) {
+      throw new Error('SourceMap.names must be an array');
+    }
+    if (record.sourcesContent !== undefined && !Array.isArray(record.sourcesContent)) {
+      throw new Error('SourceMap.sourcesContent must be an array');
+    }
 
     const rawSources = Array.isArray(record.sources) ? record.sources : [];
-    const sources = rawSources
-      .map((item) => this.asString(item))
-      .filter((item): item is string => typeof item === 'string');
+    // ECMA-426 (tc39/source-map-tests): `sources` entries may be null (legal placeholder)
+    // so the array length — and therefore mapping sourceIndex ranges — must be preserved.
+    // Non-string, non-null entries make the map invalid.
+    const sources = rawSources.map((item) => {
+      if (item === null) return null as unknown as string;
+      const str = this.asString(item);
+      if (typeof str !== 'string') {
+        throw new Error('SourceMap.sources entries must be strings or null');
+      }
+      return str;
+    });
 
     const rawNames = Array.isArray(record.names) ? record.names : [];
-    const names = rawNames
-      .map((item) => this.asString(item))
-      .filter((item): item is string => typeof item === 'string');
+    // Names entries must all be strings (tc39 names-not-string expects rejection).
+    const names = rawNames.map((item) => {
+      const str = this.asString(item);
+      if (typeof str !== 'string') {
+        throw new Error('SourceMap.names entries must be strings');
+      }
+      return str;
+    });
 
+    if (record.file !== undefined && typeof record.file !== 'string') {
+      throw new Error('SourceMap.file must be a string');
+    }
+    if (record.sourceRoot !== undefined && typeof record.sourceRoot !== 'string') {
+      throw new Error('SourceMap.sourceRoot must be a string');
+    }
+    if (record.ignoreList !== undefined && !Array.isArray(record.ignoreList)) {
+      throw new Error('SourceMap.ignoreList must be an array');
+    }
+    if (Array.isArray(record.ignoreList)) {
+      for (const item of record.ignoreList) {
+        if (typeof item !== 'number' || !Number.isInteger(item) || item < 0) {
+          throw new Error('SourceMap.ignoreList entries must be non-negative integer indices');
+        }
+      }
+    }
     const sourceRoot = this.asString(record.sourceRoot);
 
     let sourcesContent: Array<string | null> | undefined;
     if (Array.isArray(record.sourcesContent)) {
-      sourcesContent = record.sourcesContent.map((item) =>
-        typeof item === 'string' ? item : null,
-      );
+      sourcesContent = record.sourcesContent.map((item) => {
+        if (item === null || typeof item === 'string') return item as string | null;
+        throw new Error('SourceMap.sourcesContent entries must be strings or null');
+      });
     }
 
     return {

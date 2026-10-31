@@ -267,25 +267,25 @@ describe('SourcemapToolHandlersParseBase', () => {
         'SourceMap.mappings is required',
       );
     });
-    it('normalizes valid json', async () => {
+    it('normalizes valid json (tc39 semantics)', async () => {
       const res = handlers.testNormalizeSourceMap({
         version: 3,
         mappings: 'A',
-        sources: ['a.js', 123],
-        names: ['var', null],
+        sources: ['a.js', null],
+        names: ['var'],
         sourceRoot: 'root',
-        sourcesContent: ['console.log(1)', null, 123],
+        sourcesContent: ['console.log(1)', null],
       });
-      expect(res.sources).toEqual(['a.js']);
+      expect(res.sources).toEqual(['a.js', null]);
       expect(res.names).toEqual(['var']);
       expect(res.sourceRoot).toBe('root');
-      expect(res.sourcesContent).toEqual(['console.log(1)', null, null]);
+      expect(res.sourcesContent).toEqual(['console.log(1)', null]);
     });
   });
 
   describe('loadSourceMap', () => {
     it('loads and normalizes from data URI', async () => {
-      const v3 = { version: 3, mappings: 'A' };
+      const v3 = { version: 3, mappings: 'A', sources: [] };
       const b64 = Buffer.from(JSON.stringify(v3)).toString('base64');
       const loaded = await handlers.testLoadSourceMap(`data:application/json;base64,${b64}`);
       expect(loaded.map.version).toBe(3);
@@ -300,7 +300,7 @@ describe('SourcemapToolHandlersParseBase', () => {
 
     it('fetches natively', async () => {
       vi.spyOn(handlers as any, 'fetchSourceMapText').mockResolvedValue(
-        JSON.stringify({ version: 3, mappings: 'A' }),
+        JSON.stringify({ version: 3, mappings: 'A', sources: [] }),
       );
       const loaded = await handlers.testLoadSourceMap(withPath(TEST_HTTP_URLS.root, 'map.js'));
       expect(loaded.map.mappings).toBe('A');

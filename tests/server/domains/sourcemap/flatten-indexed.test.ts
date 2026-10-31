@@ -96,9 +96,9 @@ describe('flattenIndexedSourceMap', () => {
     expect(decoded.length).toBeGreaterThan(0);
   });
 
-  it('throws on an empty sections array', () => {
-    expect(() => flattenIndexedSourceMap({ version: 3, sections: [] })).toThrow(
-      /Indexed SourceMap has no sections/,
-    );
+  it('flattens an empty sections array to an empty map (tc39: index-map-empty-sections is valid)', () => {
+    const flat = flattenIndexedSourceMap({ version: 3, sections: [] });
+    expect(flat.sources).toEqual([]);
+    expect(flat.mappings).toBe('');
   });
 });

@@ -254,7 +254,7 @@ describe('SourcemapToolHandlers', () => {
         version: 3,
         sources: ['src/a.ts', 'src/b.ts'],
         sourcesContent: ['aaaaaa', 'bbb'],
-        mappings: 'AAAA,CAAC;ACCF',
+        mappings: 'AAAA,CAAC;ACCE',
         names: [],
       };
       globalFetch.mockResolvedValueOnce({

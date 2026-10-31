@@ -273,25 +273,48 @@ describe('SourcemapToolHandlersParseBase (parse-base)', () => {
   });
 
   describe('normalizeSourceMap', () => {
-    it('normalizes a valid v3 sourcemap', async () => {
+    it('normalizes a valid v3 sourcemap (tc39 semantics: null sources are legal placeholders)', async () => {
       const tool = createTool();
       const normalized = tool.testNormalizeSourceMap({
         version: 3,
         mappings: 'AAAA',
-        sources: ['a.js', 123, null],
-        names: ['n1', false, 'n2'],
+        sources: ['a.js', null],
+        names: ['n1', 'n2'],
         sourceRoot: '/src',
-        sourcesContent: ['content-a', null, 42],
+        sourcesContent: ['content-a', null],
       });
 
       expect(normalized).toEqual({
         version: 3,
         mappings: 'AAAA',
-        sources: ['a.js'],
+        sources: ['a.js', null],
         names: ['n1', 'n2'],
         sourceRoot: '/src',
-        sourcesContent: ['content-a', null, null],
+        sourcesContent: ['content-a', null],
       });
+    });
+
+    it('rejects non-string sources entries and non-string names entries (tc39)', async () => {
+      const tool = createTool();
+      expect(() =>
+        tool.testNormalizeSourceMap({ version: 3, mappings: 'AAAA', sources: ['a.js', 123] }),
+      ).toThrow('SourceMap.sources entries must be strings or null');
+      expect(() =>
+        tool.testNormalizeSourceMap({
+          version: 3,
+          mappings: 'AAAA',
+          sources: ['a.js'],
+          names: ['n1', false],
+        }),
+      ).toThrow('SourceMap.names entries must be strings');
+      expect(() =>
+        tool.testNormalizeSourceMap({
+          version: 3,
+          mappings: 'AAAA',
+          sources: ['a.js'],
+          sourcesContent: ['ok', 42],
+        }),
+      ).toThrow('SourceMap.sourcesContent entries must be strings or null');
     });
 
     it('throws when version is not 3', async () => {
@@ -316,18 +339,14 @@ describe('SourcemapToolHandlersParseBase (parse-base)', () => {
       );
     });
 
-    it('defaults non-array sources/names to [] and leaves sourcesContent undefined when absent', async () => {
+    it('rejects non-array sources/names (tc39: sources-missing expects invalid)', async () => {
       const tool = createTool();
-      const normalized = tool.testNormalizeSourceMap({
-        version: 3,
-        mappings: 'A',
-        sources: 'not-an-array',
-        names: 123,
-      });
-
-      expect(normalized.sources).toEqual([]);
-      expect(normalized.names).toEqual([]);
-      expect(normalized.sourcesContent).toBeUndefined();
+      expect(() =>
+        tool.testNormalizeSourceMap({ version: 3, mappings: 'A', sources: 'not-an-array' }),
+      ).toThrow('SourceMap.sources must be an array');
+      expect(() =>
+        tool.testNormalizeSourceMap({ version: 3, mappings: 'A', sources: [], names: 123 }),
+      ).toThrow('SourceMap.names must be an array');
     });
   });
 
