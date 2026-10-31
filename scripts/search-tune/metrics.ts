@@ -5,7 +5,7 @@
 import type {
   SearchEvalCase,
   SearchExpectation,
-} from '../../../tests/server/search/fixtures/search-quality.fixture';
+} from '../../tests/server/search/fixtures/search-quality.fixture';
 
 // ── public types ──
 
