@@ -1,9 +1,4 @@
-import {
-  createCodeCollectorMock,
-  parseJson,
-  // @ts-expect-error — auto-suppressed [TS1484]
-  NetworkRequestsResponse,
-} from '@tests/server/domains/shared/mock-factories';
+import { createCodeCollectorMock, parseJson } from '@tests/server/domains/shared/mock-factories';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const writeFileMock = vi.fn();
@@ -19,8 +14,6 @@ vi.mock('@src/utils/DetailedDataManager', () => ({
 
 vi.mock('@src/server/domains/shared/modules', () => ({
   PerformanceMonitor: vi.fn(),
-  ConsoleMonitor: vi.fn(),
-  CodeCollector: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -31,42 +24,33 @@ vi.mock('@src/utils/artifacts', () => ({
   resolveArtifactPath: (...args: any[]) => resolveArtifactPathMock(...args),
 }));
 
-import { AdvancedHandlersBase } from '@server/domains/network/handlers.base';
+import { PerformanceHandlers } from '@server/domains/network/handlers/performance-handlers';
 
-describe('AdvancedHandlersBase (performance)', () => {
+// Coverage / heap-snapshot / heap-sampling paths were retired from the
+// compositional PerformanceHandlers (superseded by page_coverage_*,
+// v8_heap_snapshot_capture, v8_heap_sampling tools) and are intentionally
+// not migrated here.
+
+describe('PerformanceHandlers (composition, ex-runtime-performance)', () => {
   const performanceMonitorMethods = {
     getPerformanceMetrics: vi.fn(),
     getPerformanceTimeline: vi.fn(),
-    startCoverage: vi.fn(),
-    stopCoverage: vi.fn(),
-    takeHeapSnapshot: vi.fn(),
     startTracing: vi.fn(),
     stopTracing: vi.fn(),
     startCPUProfiling: vi.fn(),
     stopCPUProfiling: vi.fn(),
-    startHeapSampling: vi.fn(),
-    stopHeapSampling: vi.fn(),
   };
 
   const collector = createCodeCollectorMock();
-  const consoleMonitor = {
-    isNetworkEnabled: vi.fn(),
-    enable: vi.fn(),
-    disable: vi.fn(),
-    getNetworkStatus: vi.fn(),
-    getNetworkRequests: vi.fn(),
-    getNetworkResponses: vi.fn(),
-    getResponseBody: vi.fn(),
-  } as any;
 
-  let handler: AdvancedHandlersBase;
+  let handler: PerformanceHandlers;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // @ts-expect-error — auto-suppressed [TS2345]
-    handler = new AdvancedHandlersBase(collector, consoleMonitor);
-    // Inject the mock performance monitor
-    (handler as any).performanceMonitor = performanceMonitorMethods;
+    handler = new PerformanceHandlers({
+      collector: collector as any,
+      getPerformanceMonitor: () => performanceMonitorMethods as any,
+    });
   });
 
   // ---------- handlePerformanceGetMetrics ----------
@@ -78,13 +62,9 @@ describe('AdvancedHandlersBase (performance)', () => {
         lcp: 250,
       });
 
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceGetMetrics({}),
-      );
+      const body = parseJson<any>(await handler.handlePerformanceGetMetrics({}));
       expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.metrics).toEqual({ fcp: 100, lcp: 250 });
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.timeline).toBeUndefined();
     });
 
@@ -96,120 +76,22 @@ describe('AdvancedHandlersBase (performance)', () => {
         { name: 'paint', startTime: 50 },
       ]);
 
-      const body = parseJson<NetworkRequestsResponse>(
+      const body = parseJson<any>(
         await handler.handlePerformanceGetMetrics({ includeTimeline: true }),
       );
       expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.metrics).toEqual({ fcp: 50 });
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.timeline).toEqual([{ name: 'paint', startTime: 50 }]);
     });
 
     it('does not include timeline when includeTimeline is false', async () => {
       performanceMonitorMethods.getPerformanceMetrics.mockResolvedValue({});
 
-      const body = parseJson<NetworkRequestsResponse>(
+      const body = parseJson<any>(
         await handler.handlePerformanceGetMetrics({ includeTimeline: false }),
       );
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.timeline).toBeUndefined();
       expect(performanceMonitorMethods.getPerformanceTimeline).not.toHaveBeenCalled();
-    });
-  });
-
-  // ---------- handlePerformanceStartCoverage ----------
-
-  describe('handlePerformanceStartCoverage', () => {
-    it('starts coverage and returns success', async () => {
-      performanceMonitorMethods.startCoverage.mockResolvedValue(undefined);
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceStartCoverage({}),
-      );
-      expect(body.success).toBe(true);
-      expect(body.message).toContain('coverage collection started');
-      expect(performanceMonitorMethods.startCoverage).toHaveBeenCalledOnce();
-    });
-  });
-
-  // ---------- handlePerformanceStopCoverage ----------
-
-  describe('handlePerformanceStopCoverage', () => {
-    it('returns coverage report with average', async () => {
-      performanceMonitorMethods.stopCoverage.mockResolvedValue([
-        { url: 'a.js', coveragePercentage: 80 },
-        { url: 'b.js', coveragePercentage: 60 },
-      ]);
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceStopCoverage({}),
-      );
-      expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.totalScripts).toBe(2);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.avgCoverage).toBe(70);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.coverage).toHaveLength(2);
-    });
-
-    it('returns 0 average when no coverage data exists', async () => {
-      performanceMonitorMethods.stopCoverage.mockResolvedValue([]);
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceStopCoverage({}),
-      );
-      expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.totalScripts).toBe(0);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.avgCoverage).toBe(0);
-    });
-  });
-
-  // ---------- handlePerformanceTakeHeapSnapshot ----------
-
-  describe('handlePerformanceTakeHeapSnapshot', () => {
-    it('takes heap snapshot and returns size', async () => {
-      performanceMonitorMethods.takeHeapSnapshot.mockResolvedValue(1024);
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceTakeHeapSnapshot({}),
-      );
-      expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.snapshotSize).toBe(1024);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.persistedToTrace).toBe(false);
-      expect(body.message).toContain('Heap snapshot taken');
-    });
-
-    it('persists heap snapshots into an active trace recording when available', async () => {
-      const traceRecorder = {
-        getState: vi.fn().mockReturnValue('recording'),
-        captureActiveHeapSnapshot: vi.fn().mockResolvedValue(2048),
-      };
-
-      handler = new AdvancedHandlersBase(
-        collector as any,
-        consoleMonitor as any,
-        undefined,
-        () => traceRecorder as any,
-      );
-      (handler as any).performanceMonitor = performanceMonitorMethods;
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceTakeHeapSnapshot({}),
-      );
-
-      expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.snapshotSize).toBe(2048);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.persistedToTrace).toBe(true);
-      expect(traceRecorder.captureActiveHeapSnapshot).toHaveBeenCalledOnce();
-      expect(performanceMonitorMethods.takeHeapSnapshot).not.toHaveBeenCalled();
     });
   });
 
@@ -219,9 +101,7 @@ describe('AdvancedHandlersBase (performance)', () => {
     it('starts tracing with default options', async () => {
       performanceMonitorMethods.startTracing.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handlePerformanceTraceStart({}),
-      );
+      const body = parseJson<any>(await handler.handlePerformanceTraceStart({}));
       expect(body.success).toBe(true);
       expect(body.message).toContain('tracing started');
       expect(performanceMonitorMethods.startTracing).toHaveBeenCalledWith({
@@ -264,15 +144,11 @@ describe('AdvancedHandlersBase (performance)', () => {
         sizeBytes: 102400,
       });
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handlePerformanceTraceStop({}));
+      const body = parseJson<any>(await handler.handlePerformanceTraceStop({}));
       expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.artifactPath).toBe('/tmp/trace.json');
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.eventCount).toBe(500);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.sizeBytes).toBe(102400);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.sizeKB).toBe('100.0');
       expect(body.hint).toContain('Chrome DevTools');
     });
@@ -297,7 +173,7 @@ describe('AdvancedHandlersBase (performance)', () => {
     it('starts CPU profiling and returns success', async () => {
       performanceMonitorMethods.startCPUProfiling.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStart({}));
+      const body = parseJson<any>(await handler.handleProfilerCpuStart({}));
       expect(body.success).toBe(true);
       expect(body.message).toContain('CPU profiling started');
     });
@@ -363,21 +239,14 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.artifactPath).toBe('artifacts/profiles/cpu-profile.cpuprofile');
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.totalNodes).toBe(3);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.totalSamples).toBe(3);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.durationMs).toBe(1000);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions).toHaveLength(2); // coldFunc (hitCount=0) excluded
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[0].functionName).toBe('hotFunc');
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[0].hitCount).toBe(100);
       expect(writeFileMock).toHaveBeenCalledWith(
         '/tmp/profile.cpuprofile',
@@ -394,11 +263,10 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(
+      const body = parseJson<any>(
         await handler.handleProfilerCpuStop({ artifactPath: '/custom/profile.cpuprofile' }),
       );
       expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.artifactPath).toBe('/custom/profile.cpuprofile');
       expect(writeFileMock).toHaveBeenCalledWith(
         '/custom/profile.cpuprofile',
@@ -425,8 +293,7 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
-      // @ts-expect-error — auto-suppressed [TS2339]
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.hotFunctions[0].functionName).toBe('(anonymous)');
     });
 
@@ -442,10 +309,8 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
-      // @ts-expect-error — auto-suppressed [TS2339]
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.totalSamples).toBe(0);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions).toHaveLength(0);
     });
 
@@ -477,20 +342,17 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       // 样本 3×3 次 → 节点 3/2/1 各 +3;样本 4×1 次 → 节点 4/1 各 +1
       // counts: {1: 4, 3: 3, 2: 3, 4: 1} — 父节点(根)累计子样本;
       // 同频节点(3/2)按 samples 首次出现序稳定排序
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions.map((h: any) => h.functionName)).toEqual([
         'root',
         'inner',
         'hotFunc',
         'warmFunc',
       ]);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[0].hitCount).toBe(4);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[1].hitCount).toBe(3);
     });
 
@@ -518,10 +380,8 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
-      // @ts-expect-error — auto-suppressed [TS2339]
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.hotFunctions[0].functionName).toBe('samplesHot');
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[0].hitCount).toBe(3);
     });
 
@@ -546,10 +406,8 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
-      // @ts-expect-error — auto-suppressed [TS2339]
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.hotFunctions).toHaveLength(1);
-      // @ts-expect-error — auto-suppressed [TS2339]
       expect(body.hotFunctions[0].functionName).toBe('hotFunc');
     });
 
@@ -568,85 +426,18 @@ describe('AdvancedHandlersBase (performance)', () => {
       });
       writeFileMock.mockResolvedValue(undefined);
 
-      const body = parseJson<NetworkRequestsResponse>(await handler.handleProfilerCpuStop({}));
-      // @ts-expect-error — auto-suppressed [TS2339]
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
       expect(body.hotFunctions).toHaveLength(0);
       expect(body.message).toContain('samples-based format');
     });
-  });
 
-  // ---------- handleProfilerHeapSamplingStart ----------
+    it('rejects a profile with an unexpected shape instead of casting blindly', async () => {
+      performanceMonitorMethods.stopCPUProfiling.mockResolvedValue({ broken: true });
 
-  describe('handleProfilerHeapSamplingStart', () => {
-    it('starts heap sampling with default options', async () => {
-      performanceMonitorMethods.startHeapSampling.mockResolvedValue(undefined);
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handleProfilerHeapSamplingStart({}),
-      );
-      expect(body.success).toBe(true);
-      expect(body.message).toContain('Heap sampling started');
-      expect(performanceMonitorMethods.startHeapSampling).toHaveBeenCalledWith({
-        samplingInterval: undefined,
-      });
-    });
-
-    it('passes samplingInterval option', async () => {
-      performanceMonitorMethods.startHeapSampling.mockResolvedValue(undefined);
-
-      await handler.handleProfilerHeapSamplingStart({ samplingInterval: 16384 });
-      expect(performanceMonitorMethods.startHeapSampling).toHaveBeenCalledWith({
-        samplingInterval: 16384,
-      });
-    });
-
-    it('ignores non-number samplingInterval', async () => {
-      performanceMonitorMethods.startHeapSampling.mockResolvedValue(undefined);
-
-      await handler.handleProfilerHeapSamplingStart({ samplingInterval: 'not-a-number' });
-      expect(performanceMonitorMethods.startHeapSampling).toHaveBeenCalledWith({
-        samplingInterval: undefined,
-      });
-    });
-  });
-
-  // ---------- handleProfilerHeapSamplingStop ----------
-
-  describe('handleProfilerHeapSamplingStop', () => {
-    it('stops heap sampling and returns results', async () => {
-      performanceMonitorMethods.stopHeapSampling.mockResolvedValue({
-        artifactPath: '/tmp/heap.json',
-        sampleCount: 42,
-        topAllocations: [{ functionName: 'allocator', size: 1024 }],
-      });
-
-      const body = parseJson<NetworkRequestsResponse>(
-        await handler.handleProfilerHeapSamplingStop({}),
-      );
-      expect(body.success).toBe(true);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.artifactPath).toBe('/tmp/heap.json');
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.sampleCount).toBe(42);
-      // @ts-expect-error — auto-suppressed [TS2339]
-      expect(body.topAllocations).toHaveLength(1);
-    });
-
-    it('passes artifactPath and topN options', async () => {
-      performanceMonitorMethods.stopHeapSampling.mockResolvedValue({
-        artifactPath: '/custom/heap.json',
-        sampleCount: 10,
-        topAllocations: [],
-      });
-
-      await handler.handleProfilerHeapSamplingStop({
-        artifactPath: '/custom/heap.json',
-        topN: 5,
-      });
-      expect(performanceMonitorMethods.stopHeapSampling).toHaveBeenCalledWith({
-        artifactPath: '/custom/heap.json',
-        topN: 5,
-      });
+      const body = parseJson<any>(await handler.handleProfilerCpuStop({}));
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('unexpected shape');
+      expect(writeFileMock).not.toHaveBeenCalled();
     });
   });
 });

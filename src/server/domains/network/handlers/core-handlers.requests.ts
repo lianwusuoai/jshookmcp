@@ -8,7 +8,7 @@ import {
   isFiniteNumber,
   asOptionalString,
   type NetworkRequestPayload,
-} from '../handlers.base.types';
+} from './network-types';
 import { parseNumberArg, parseBooleanArg } from './shared';
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;

@@ -4,7 +4,7 @@ import {
   isNetworkRequestPayload,
   isObjectRecord,
   type NetworkRequestPayload,
-} from './handlers.base.types';
+} from './handlers/network-types';
 
 const REQUEST_MERGE_TIMESTAMP_WINDOW_MS = 1_500;
 

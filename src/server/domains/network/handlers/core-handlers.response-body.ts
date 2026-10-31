@@ -2,7 +2,7 @@ import { R } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 import type { NetworkHandlerDeps } from './shared';
 import { parseBooleanArg, parseNumberArg } from './shared';
-import { asOptionalString } from '../handlers.base.types';
+import { asOptionalString } from './network-types';
 import { ToolError } from '@errors/ToolError';
 
 export async function handleNetworkGetResponseBody(

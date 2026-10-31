@@ -8,7 +8,7 @@ import type { ToolResponse } from '@server/types';
 import type { NetworkHandlerDeps } from './shared';
 import { getDetailedDataManager } from './shared';
 import { getMergedNetworkRequestsFromMonitor } from '../request-merge';
-import type { NetworkRequestPayload } from '../handlers.base.types';
+import type { NetworkRequestPayload } from './network-types';
 import {
   handleNetworkMonitor,
   handleNetworkEnable,

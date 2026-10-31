@@ -1,12 +1,8 @@
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 import type { NetworkHandlerDeps } from './shared';
-import {
-  isNetworkRequestPayload,
-  isNetworkResponsePayload,
-  isFiniteNumber,
-} from '../handlers.base.types';
-import type { NetworkRequestPayload } from '../handlers.base.types';
+import { isNetworkRequestPayload, isNetworkResponsePayload, isFiniteNumber } from './network-types';
+import type { NetworkRequestPayload } from './network-types';
 
 export async function handleNetworkGetStats(
   deps: NetworkHandlerDeps,
