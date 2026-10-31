@@ -121,7 +121,7 @@
     "import/no-cycle": "error"
   },
   "plugins": ["unicorn", "import", "typescript"],
-  "ignorePatterns": ["dist/**", "node_modules/**"],
+  "ignorePatterns": ["dist/**", "node_modules/**", "tests/benchmarks/fixtures/**"],
   "overrides": [
     {
       "files": ["tests/**/*.ts"],
