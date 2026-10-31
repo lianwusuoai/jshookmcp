@@ -418,32 +418,13 @@ async function reloadExtensionsInner(ctx: MCPServerContext): Promise<ExtensionRe
   const strictLoad = isPluginStrictLoad();
 
   if (strictLoad && allowedDigests.size === 0) {
-    const msg = STRICT_PLUGIN_ALLOWLIST_ERROR;
-    errors.push(msg);
-    logger.error('[extensions] ' + msg);
-
-    // Skip all plugin loading but still process workflows
-    const workflowFiles = await discoverWorkflowFiles(workflowRoots);
-    await loadWorkflows(ctx, workflowFiles, warnings, errors);
-
-    if (removedTools > 0) {
-      try {
-        await ctx.server.sendToolListChanged();
-      } catch (error) {
-        logger.warn('sendToolListChanged failed after extension reload:', error);
-      }
-    }
-
-    ctx.lastExtensionReloadAt = new Date().toISOString();
-    const list = buildListResult(ctx, pluginRoots, workflowRoots);
-    return {
-      ...list,
-      addedTools: 0,
-      autoActivatedTools: [],
+    return reloadStrictLoadDeny(
+      ctx,
+      { pluginRoots, workflowRoots },
       removedTools,
       warnings,
       errors,
-    };
+    );
   }
 
   if (allowedDigests.size === 0) {
@@ -508,51 +489,16 @@ async function reloadExtensionsInner(ctx: MCPServerContext): Promise<ExtensionRe
     const metrics = new Set<string>();
     let pluginState: PluginState = 'loaded';
 
-    const allowInvokeAll = plugin.allowedTools.includes('*');
-
-    const lifecycleContext: PluginLifecycleContext = {
+    const lifecycleContext = buildPluginLifecycleContext({
       pluginId: plugin.id,
       pluginRoot: pluginProjectRoot,
-      config: ctx.config as unknown as Record<string, unknown>,
-      get state() {
-        return pluginState;
-      },
-      registerMetric(metricName: string) {
-        metrics.add(metricName);
-      },
-      async invokeTool(name: string, args: Record<string, unknown> = {}): Promise<ToolResponse> {
-        if (typeof name !== 'string' || name.length === 0) {
-          throw new Error('invokeTool requires a non-empty tool name');
-        }
-        if (!allowInvokeAll && !plugin.allowedTools.includes(name)) {
-          throw new Error(
-            `Plugin "${plugin.id}" is not allowed to invoke "${name}". ` +
-              'Declare it in allowTool calls.',
-          );
-        }
-        if (!baseToolNames.has(name)) {
-          throw new Error(
-            `Plugin "${plugin.id}" can only invoke built-in tools. "${name}" is not built-in.`,
-          );
-        }
-        if (!ctx.router.has(name)) {
-          throw new Error(`Tool "${name}" is not available in the current active profile.`);
-        }
-        return ctx.executeToolWithTracking(name, (args ?? {}) as Record<string, unknown>);
-      },
-      hasPermission(_capability: string) {
-        return true;
-      },
-      getConfig<T>(path: string, fallback?: T) {
-        return extractConfigValue(ctx, path, fallback);
-      },
-      setRuntimeData(key: string, value: unknown) {
-        runtimeData.set(key, value);
-      },
-      getRuntimeData<T = unknown>(key: string): T | undefined {
-        return runtimeData.get(key) as T | undefined;
-      },
-    };
+      ctx,
+      baseToolNames,
+      allowedTools: plugin.allowedTools,
+      runtimeData,
+      metrics,
+      getPluginState: () => pluginState,
+    });
     const runtimeRecord: ExtensionPluginRuntimeRecord = {
       plugin,
       lifecycleContext,
@@ -716,5 +662,105 @@ async function reloadExtensionsInner(ctx: MCPServerContext): Promise<ExtensionRe
     removedTools,
     warnings,
     errors,
+  };
+}
+
+/**
+ * Strict-load deny path: plugin loading is skipped entirely (trust boundary
+ * without an allowlist), but workflow roots still load and the removed-tool
+ * notification still fires.
+ */
+async function reloadStrictLoadDeny(
+  ctx: MCPServerContext,
+  roots: { pluginRoots: string[]; workflowRoots: string[] },
+  removedTools: number,
+  warnings: string[],
+  errors: string[],
+): Promise<ExtensionReloadResult> {
+  const msg = STRICT_PLUGIN_ALLOWLIST_ERROR;
+  errors.push(msg);
+  logger.error('[extensions] ' + msg);
+
+  const workflowFiles = await discoverWorkflowFiles(roots.workflowRoots);
+  await loadWorkflows(ctx, workflowFiles, warnings, errors);
+
+  if (removedTools > 0) {
+    try {
+      await ctx.server.sendToolListChanged();
+    } catch (error) {
+      logger.warn('sendToolListChanged failed after extension reload:', error);
+    }
+  }
+
+  ctx.lastExtensionReloadAt = new Date().toISOString();
+  const list = buildListResult(ctx, roots.pluginRoots, roots.workflowRoots);
+  return {
+    ...list,
+    addedTools: 0,
+    autoActivatedTools: [],
+    removedTools,
+    warnings,
+    errors,
+  };
+}
+
+/** Ctor inputs for the per-plugin lifecycle context. */
+interface PluginLifecycleContextInputs {
+  pluginId: string;
+  pluginRoot: string;
+  ctx: MCPServerContext;
+  baseToolNames: Set<string>;
+  allowedTools: string[];
+  runtimeData: Map<string, unknown>;
+  metrics: Set<string>;
+  getPluginState: () => PluginState;
+}
+
+/** Build the PluginLifecycleContext handed to plugin hooks. */
+function buildPluginLifecycleContext(inputs: PluginLifecycleContextInputs): PluginLifecycleContext {
+  const { pluginId, pluginRoot, ctx, baseToolNames, allowedTools, runtimeData } = inputs;
+  return {
+    pluginId,
+    pluginRoot,
+    config: ctx.config as unknown as Record<string, unknown>,
+    get state() {
+      return inputs.getPluginState();
+    },
+    registerMetric(metricName: string) {
+      inputs.metrics.add(metricName);
+    },
+    async invokeTool(name: string, args: Record<string, unknown> = {}): Promise<ToolResponse> {
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error('invokeTool requires a non-empty tool name');
+      }
+      const allowInvokeAll = allowedTools.includes('*');
+      if (!allowInvokeAll && !allowedTools.includes(name)) {
+        throw new Error(
+          `Plugin "${pluginId}" is not allowed to invoke "${name}". ` +
+            'Declare it in allowTool calls.',
+        );
+      }
+      if (!baseToolNames.has(name)) {
+        throw new Error(
+          `Plugin "${pluginId}" can only invoke built-in tools. "${name}" is not built-in.`,
+        );
+      }
+      if (!ctx.router.has(name)) {
+        throw new Error(`Tool "${name}" is not available in the current active profile.`);
+      }
+      return ctx.executeToolWithTracking(name, (args ?? {}) as Record<string, unknown>);
+    },
+    hasPermission(_capability: string) {
+      return true;
+    },
+    getConfig<T>(path: string, fallback?: T) {
+      return extractConfigValue(ctx, path, fallback);
+    },
+    setRuntimeData(key: string, value: unknown) {
+      runtimeData.set(key, value);
+    },
+    getRuntimeData<T = unknown>(key: string): T | undefined {
+      return runtimeData.get(key) as T | undefined;
+    },
   };
 }
