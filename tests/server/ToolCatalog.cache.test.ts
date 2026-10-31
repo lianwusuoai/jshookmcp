@@ -29,6 +29,16 @@ vi.mock('@server/registry/views', () => ({
   getAllRegistrations: mocks.getAllRegistrations,
   getRegistrationByName: mocks.getRegistrationByName,
   onRegistryInvalidate: mocks.onRegistryInvalidate,
+  // ToolCatalog re-exports these straight from views; back them with the
+  // mocked builders so the cache-invalidation regression stays exercised.
+  getToolDomain: (name: string) => mocks.buildToolDomainMap().get(name) ?? null,
+  allTools: new Proxy([] as Tool[], {
+    get(_t, p) {
+      const real = mocks.buildAllTools() as unknown as Record<string | symbol, unknown>;
+      const v = real[p as string];
+      return typeof v === 'function' ? (v as Function).bind(real) : v;
+    },
+  }),
 }));
 
 import {
