@@ -289,12 +289,13 @@ export default defineConfig({
         test: {
           name: 'pure',
           pool: 'forks', // Use forks because pure tests might load better-sqlite3 via cache utils
-          // No test in this project mutates module state across files (no
-          // module mocking of shared singletons, no registry mutation), so
-          // sharing the module graph across files within one fork is safe and
-          // removes ~80 cold module-graph imports. Revert to isolated if a
-          // future test adds cross-file module mock leakage.
-          isolate: false,
+          // NOTE: isolate:false was tried in 928de3e7 and reverted — sharing
+          // the module graph across files makes shared-fork state leak into
+          // vi.mock('node:*')-heavy suites (sanitizeForCache / artifacts /
+          // DetailedDataManager / safeOutput / bridges.shared rotate failures
+          // per run; single-file runs are green). CI linux-full reproduces it
+          // on both Node 22 and 24. Keep per-file isolation here; the ~80
+          // cold imports are the price of determinism.
           include: [
             'tests/utils/**/*.test.ts',
             'tests/errors/**/*.test.ts',
