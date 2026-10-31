@@ -170,7 +170,7 @@ export class InterceptHandlers {
       responseBody:
         typeof source.responseBody === 'string'
           ? source.responseBody
-          : typeof source.responseBody === 'object'
+          : source.responseBody !== null && typeof source.responseBody === 'object'
             ? JSON.stringify(source.responseBody)
             : undefined,
     };
