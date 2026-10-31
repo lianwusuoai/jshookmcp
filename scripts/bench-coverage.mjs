@@ -23,7 +23,14 @@ const res = spawnSync(
     '--coverage.reporter=text-summary',
     '--coverage.reportsDirectory=coverage',
   ],
-  { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' },
+  {
+    cwd: root,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    // This run generates the measurement the per-tool scorecard reads. Set the
+    // COVERAGE_FULL marker so the in-run gate exempts the not-yet-written file.
+    env: { ...process.env, COVERAGE_FULL: 'true' },
+  },
 );
 
 const coverageFile = resolve(root, 'coverage/coverage-final.json');
