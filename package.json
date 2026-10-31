@@ -90,9 +90,10 @@
     "lint:md": "corepack pnpm dlx markdownlint-cli2 README.md README.zh.md CONTRIBUTING.md docs/**/*.md",
     "lint": "oxlint src/ tests/",
     "lint:fix": "oxlint --fix src/ tests/",
-    "format": "oxfmt \"src/**\" \"tests/**\" \"!tests/tmp/**\" \"!src/server/registry/generated-tool-catalog.ts\" --write --no-error-on-unmatched-pattern",
-    "format:check": "oxfmt \"src/**\" \"tests/**\" \"!tests/tmp/**\" \"!src/server/registry/generated-tool-catalog.ts\" --check --no-error-on-unmatched-pattern",
+    "format": "oxfmt \"src/**\" \"tests/**\" \"!tests/tmp/**\" \"!tests/benchmarks/fixtures/**\" \"!src/server/registry/generated-tool-catalog.ts\" --write --no-error-on-unmatched-pattern",
+    "format:check": "oxfmt \"src/**\" \"tests/**\" \"!tests/tmp/**\" \"!tests/benchmarks/fixtures/**\" \"!src/server/registry/generated-tool-catalog.ts\" --check --no-error-on-unmatched-pattern",
     "test": "node scripts/run-vitest-smart.mjs run",
+    "bench:tools": "node scripts/bench-tools.mjs",
     "test:e2e": "node scripts/build.mjs && cross-env E2E_TARGET_URL=https://vmoranv.github.io/jshookmcp/ vitest run --config tests/e2e/vitest.e2e.config.ts",
     "test:e2e:portable": "cross-env E2E_TARGET_URL=https://vmoranv.github.io/jshookmcp/ PUPPETEER_HEADLESS=true vitest run --config tests/e2e/vitest.e2e.config.ts tests/e2e/portable-smoke.e2e.test.ts tests/e2e/process-lifecycle.test.ts",
     "test:e2e:protocol": "vitest run --config tests/e2e/vitest.e2e.config.ts tests/e2e/protocol-pure-compute.e2e.test.ts",
@@ -126,7 +127,9 @@
     "search:tune": "tsx scripts/search-tune/optimize.ts",
     "search:tune:report": "tsx scripts/search-tune/report.ts",
     "search:benchmark-model": "tsx scripts/search-tune/compare-static-model.ts",
-    "search:stats": "node scripts/search-quality-stats.mjs"
+    "bench:coverage": "node scripts/bench-coverage.mjs",
+    "bench:e2e": "node scripts/bench-e2e.mjs",
+    "bench:fetch-fixtures": "node scripts/fetch-bench-fixtures.mjs"
   },
   "dependencies": {
     "@alexaltea/capstone-js": "^5.0.9",
