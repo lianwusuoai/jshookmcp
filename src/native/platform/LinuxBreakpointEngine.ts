@@ -26,6 +26,7 @@ import type {
 } from '@native/HardwareBreakpoint.types';
 import { formatAddress } from '../formatAddress';
 import { encodeDR7 } from '../Win32Debug';
+import { traceAccessShared } from '../breakpoint-registers';
 import { sleep, allocateDR as allocateDebugRegister } from './utils';
 
 // ── ptrace constants ────────────────────────────────────────────────────
@@ -303,21 +304,17 @@ export class LinuxBreakpointEngine {
     maxHits?: number,
     timeoutMs?: number,
   ): Promise<BreakpointHit[]> {
-    const max = maxHits ?? BREAKPOINT_TRACE_MAX_HITS;
-    const timeout = timeoutMs ?? BREAKPOINT_HIT_TIMEOUT_MS;
-    const bp = await this.setBreakpoint(pid, address, access);
-    const hits: BreakpointHit[] = [];
-
-    const deadline = Date.now() + timeout;
-    while (hits.length < max && Date.now() < deadline) {
-      const hit = await this.waitForHit(Math.min(1000, deadline - Date.now()));
-      if (hit?.breakpointId === bp.id) {
-        hits.push(hit);
-      }
-    }
-
-    await this.removeBreakpoint(bp.id);
-    return hits;
+    return traceAccessShared({
+      pid,
+      address,
+      access,
+      maxHits,
+      timeoutMs,
+      constants: { BREAKPOINT_TRACE_MAX_HITS, BREAKPOINT_HIT_TIMEOUT_MS },
+      setBreakpoint: (p, a, acc) => this.setBreakpoint(p, a, acc),
+      waitForHit: (ms) => this.waitForHit(ms),
+      removeBreakpoint: (id) => this.removeBreakpoint(id),
+    });
   }
 
   // ── private ──
