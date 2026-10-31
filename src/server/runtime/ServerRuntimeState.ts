@@ -42,6 +42,39 @@ const EMPTY_BROWSER_ATTACH: BrowserAttachRuntimeSnapshot = {
   attachedAt: null,
 };
 
+function restoreBrowserAttach(
+  browserAttach: Record<string, unknown> | undefined | null,
+): BrowserAttachRuntimeSnapshot {
+  return browserAttach && typeof browserAttach === 'object'
+    ? {
+        endpoint: typeof browserAttach.endpoint === 'string' ? browserAttach.endpoint : null,
+        selectedIndex:
+          typeof browserAttach.selectedIndex === 'number' &&
+          Number.isInteger(browserAttach.selectedIndex)
+            ? browserAttach.selectedIndex
+            : null,
+        selectedUrl:
+          typeof browserAttach.selectedUrl === 'string' ? browserAttach.selectedUrl : null,
+        selectedTitle:
+          typeof browserAttach.selectedTitle === 'string' ? browserAttach.selectedTitle : null,
+        selectedTargetId:
+          typeof browserAttach.selectedTargetId === 'string'
+            ? browserAttach.selectedTargetId
+            : null,
+        browserPid:
+          typeof browserAttach.browserPid === 'number' && Number.isInteger(browserAttach.browserPid)
+            ? browserAttach.browserPid
+            : null,
+        rendererPid:
+          typeof browserAttach.rendererPid === 'number' &&
+          Number.isInteger(browserAttach.rendererPid)
+            ? browserAttach.rendererPid
+            : null,
+        attachedAt: typeof browserAttach.attachedAt === 'string' ? browserAttach.attachedAt : null,
+      }
+    : { ...EMPTY_BROWSER_ATTACH };
+}
+
 export class ServerRuntimeState {
   private dirty = false;
   private persistedRevision = 0;
@@ -100,6 +133,19 @@ export class ServerRuntimeState {
         : [],
     );
 
+    this.restorePendingDomainTtls(snapshot);
+    this.browserAttach = restoreBrowserAttach(
+      snapshot.browserAttach as Record<string, unknown> | undefined | null,
+    );
+    this.restorePendingToolCoverage(snapshot);
+
+    this.revision += 1;
+    this.persistedRevision = this.revision;
+    this.dirty = false;
+  }
+
+  /** TTL map from snapshot — skips malformed entries. */
+  private restorePendingDomainTtls(snapshot: Partial<RuntimeStateSnapshot>): void {
     this.pendingDomainTtls = new Map<string, PersistedDomainTtl>();
     if (snapshot.domainTtls && typeof snapshot.domainTtls === 'object') {
       for (const [domain, rawEntry] of Object.entries(snapshot.domainTtls)) {
@@ -117,40 +163,10 @@ export class ServerRuntimeState {
         this.pendingDomainTtls.set(domain, { ttlMinutes, toolNames });
       }
     }
+  }
 
-    const browserAttach = snapshot.browserAttach;
-    this.browserAttach =
-      browserAttach && typeof browserAttach === 'object'
-        ? {
-            endpoint: typeof browserAttach.endpoint === 'string' ? browserAttach.endpoint : null,
-            selectedIndex:
-              typeof browserAttach.selectedIndex === 'number' &&
-              Number.isInteger(browserAttach.selectedIndex)
-                ? browserAttach.selectedIndex
-                : null,
-            selectedUrl:
-              typeof browserAttach.selectedUrl === 'string' ? browserAttach.selectedUrl : null,
-            selectedTitle:
-              typeof browserAttach.selectedTitle === 'string' ? browserAttach.selectedTitle : null,
-            selectedTargetId:
-              typeof browserAttach.selectedTargetId === 'string'
-                ? browserAttach.selectedTargetId
-                : null,
-            browserPid:
-              typeof browserAttach.browserPid === 'number' &&
-              Number.isInteger(browserAttach.browserPid)
-                ? browserAttach.browserPid
-                : null,
-            rendererPid:
-              typeof browserAttach.rendererPid === 'number' &&
-              Number.isInteger(browserAttach.rendererPid)
-                ? browserAttach.rendererPid
-                : null,
-            attachedAt:
-              typeof browserAttach.attachedAt === 'string' ? browserAttach.attachedAt : null,
-          }
-        : { ...EMPTY_BROWSER_ATTACH };
-
+  /** Tool coverage counts from snapshot — clamps malformed values to defaults. */
+  private restorePendingToolCoverage(snapshot: Partial<RuntimeStateSnapshot>): void {
     this.toolCoverage.clear();
     if (snapshot.toolCoverage && typeof snapshot.toolCoverage === 'object') {
       for (const [name, rawEntry] of Object.entries(snapshot.toolCoverage)) {
@@ -170,10 +186,6 @@ export class ServerRuntimeState {
         });
       }
     }
-
-    this.revision += 1;
-    this.persistedRevision = this.revision;
-    this.dirty = false;
   }
 
   noteDirty(): void {
