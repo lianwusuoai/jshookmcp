@@ -7,35 +7,13 @@
  */
 
 // Unified Browser Manager (primary interface)
-export {
-  UnifiedBrowserManager,
-  type BrowserDriver,
-  type HeadlessMode,
-  type ProxyConfig,
-  type UnifiedBrowserConfig,
-  type IBrowserManager,
-  type BrowserStatus,
-} from '@modules/browser/UnifiedBrowserManager';
+export { UnifiedBrowserManager } from '@modules/browser/UnifiedBrowserManager';
 
 // Chrome Browser Manager
-export { BrowserModeManager, type BrowserModeConfig } from '@modules/browser/BrowserModeManager';
+export { BrowserModeManager } from '@modules/browser/BrowserModeManager';
 
 // Camoufox Browser Manager
-export {
-  CamoufoxBrowserManager,
-  type CamoufoxBrowserConfig,
-} from '@modules/browser/CamoufoxBrowserManager';
+export { CamoufoxBrowserManager } from '@modules/browser/CamoufoxBrowserManager';
 
 // Browser Discovery
-export {
-  BrowserDiscovery,
-  type BrowserInfo,
-  type BrowserSignature,
-} from '@modules/browser/BrowserDiscovery';
-
-export {
-  type BrowserTargetInfo,
-  type ManagedTargetSessionEntry,
-  type PersistentScriptEntry,
-  type TargetFilters,
-} from '@modules/browser/BrowserTargetSessionManager.shared';
+export { BrowserDiscovery } from '@modules/browser/BrowserDiscovery';
