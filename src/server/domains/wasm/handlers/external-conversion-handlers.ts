@@ -1,8 +1,9 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { argBool, argString, argStringRequired } from '@server/domains/shared/parse-args';
 import { WASM_TOOL_TIMEOUT_MS } from '@src/constants';
 import { ExternalToolHandlersBase } from './external-base';
+import { inspectModuleStructure } from './module-structure';
 
 export class ExternalConversionHandlers extends ExternalToolHandlersBase {
   async handleWasmDisassemble(args: Record<string, unknown>) {
@@ -101,7 +102,69 @@ export class ExternalConversionHandlers extends ExternalToolHandlersBase {
     });
 
     if (!result.ok) {
-      return this.fail(result.stderr, result.exitCode ?? undefined);
+      // wabt absent or broken: fall back to the pure-TS structural parser instead of
+      // hard-failing. The pure path covers section identity/sizes (no disassembly),
+      // so disassemble requests that cannot be served stay a loud failure.
+      const wabtUnavailable = /wasm-objdump|enoent|spawn|not found|which/i.test(result.stderr);
+      if (!wabtUnavailable || sections === 'disassemble') {
+        return this.fail(result.stderr, result.exitCode ?? undefined);
+      }
+      let bytes: Buffer;
+      let structure: ReturnType<typeof inspectModuleStructure>;
+      try {
+        bytes = await readFile(inputPath);
+        structure = inspectModuleStructure(bytes);
+      } catch (fallbackError) {
+        // The file itself is unreadable — surface BOTH the wabt error and the
+        // fallback error so neither diagnostic path is hidden.
+        const fallbackMessage =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        return this.fail(
+          `${result.stderr.trim()} (pure-TS fallback also failed: ${fallbackMessage})`,
+        );
+      }
+      // Project the parsed structure onto a section list equivalent to objdump -h:
+      // every standard section the parser observed (count>0) plus custom sections.
+      const fallbackSections: Array<Record<string, unknown>> = [
+        { name: 'type', id: 1, count: structure.types.length },
+        { name: 'import', id: 2, count: structure.importCount },
+        { name: 'function', id: 3, count: structure.declaredFunctions.length },
+        { name: 'table', id: 4, count: structure.tables.length },
+        { name: 'memory', id: 5, count: structure.memories.length },
+        { name: 'global', id: 6, count: structure.globals.length },
+        { name: 'export', id: 7, count: structure.exportCount },
+        ...(structure.startFunction !== undefined ? [{ name: 'start', id: 8, count: 1 }] : []),
+        { name: 'element', id: 9, count: structure.elementSegments },
+        ...(structure.codeSection
+          ? [
+              {
+                name: 'code',
+                id: 10,
+                count: structure.codeSection.functionCount,
+                bytes: structure.codeSection.totalCodeBytes,
+              },
+            ]
+          : []),
+        { name: 'data', id: 11, count: structure.dataSegments },
+        ...structure.customSections.map((c) => ({
+          name: `custom:${c.name}`,
+          bytes: c.payloadBytes,
+        })),
+      ];
+      return this.ok({
+        source: 'pure-ts-fallback',
+        reason: `wabt wasm-objdump unavailable (${result.stderr.trim().split('\n')[0] ?? 'unknown'})`,
+        totalLines: fallbackSections.length,
+        preview: fallbackSections
+          .map(
+            (sec) =>
+              `${String(sec['name'])}: ${String(sec['bytes'] ?? `${String(sec['count'])} entries`)}`,
+          )
+          .join('\n'),
+        sections: fallbackSections,
+        parseErrors: structure.parseErrors,
+        durationMs: result.durationMs,
+      });
     }
 
     return this.ok({

@@ -599,7 +599,8 @@ describe('WasmToolHandlers – additional coverage', () => {
         }),
       );
       expect(body.success).toBe(false);
-      expect(body.error).toContain('No WASM runtime found');
+      // auto mode now falls back to the built-in node WebAssembly engine before giving up
+      expect(body.error).toMatch(/No WASM runtime found|node WebAssembly runtime/i);
     });
 
     it('uses explicitly specified wasmer runtime', async () => {
