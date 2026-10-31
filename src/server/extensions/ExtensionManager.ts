@@ -508,110 +508,31 @@ async function reloadExtensionsInner(ctx: MCPServerContext): Promise<ExtensionRe
     const loadedTools: string[] = [];
     const loadedToolRecords: ExtensionToolRecord[] = [];
 
-    try {
-      if (plugin.onLoadHandler) {
-        await plugin.onLoadHandler(lifecycleContext);
-      }
-      pluginState = 'loaded';
-      runtimeRecord.state = pluginState;
-
-      if (plugin.onValidateHandler) {
-        const validation = await plugin.onValidateHandler(lifecycleContext);
-        if (!validation.valid) {
-          warnings.push(`Plugin ${plugin.id} validation failed: ${validation.errors.join('; ')}`);
-          continue; // skip the rest if invalid
-        }
-        pluginState = 'validated';
-        runtimeRecord.state = pluginState;
-      }
-
-      if (plugin.onActivateHandler) {
-        await plugin.onActivateHandler(lifecycleContext);
-        pluginState = 'activated';
-        runtimeRecord.state = pluginState;
-      }
-      ctx.extensionPluginRuntimeById.set(plugin.id, runtimeRecord);
-
-      // Register plugin tools into the extension registry and auto-activate
-      // the subset visible in the current base profile.
-      const pluginDomain = `plugin:${plugin.id}`;
-      for (const toolDef of plugin.tools) {
-        if (baseToolNames.has(toolDef.name)) {
-          warnings.push(
-            `Skip tool "${toolDef.name}" from plugin "${plugin.id}": collides with built-in tool name`,
-          );
-          continue;
-        }
-        if (ctx.extensionToolsByName.has(toolDef.name)) {
-          warnings.push(
-            `Skip duplicate extension tool "${toolDef.name}" from plugin "${plugin.id}"`,
-          );
-          continue;
-        }
-
-        const toolRecord: ExtensionToolRecord = {
-          name: toolDef.name,
-          domain: pluginDomain,
-          source: pluginFile,
-          tool: {
-            name: toolDef.name,
-            description: toolDef.description,
-            inputSchema: toolDef.schema,
-          },
-          profiles: toolDef.profiles ?? plugin.profiles,
-          // Tool-execution hooks: the plugin's before/after hooks gate and can
-          // rewrite calls to ITS OWN tools only (least privilege). Plugins
-          // without hooks get the original handler back unchanged.
-          handler: wrapExtensionToolHandler({
-            pluginId: plugin.id,
-            toolName: toolDef.name,
-            beforeHooks: normalizeHookList(plugin.toolExecuteBeforeHooks),
-            afterHooks: normalizeHookList(plugin.toolExecuteAfterHooks),
-            handler: async (args: Record<string, unknown>) => {
-              try {
-                return await toolDef.handler(args, lifecycleContext);
-              } catch (error) {
-                logger.error(`[extension:${plugin.id}] Tool "${toolDef.name}" failed:`, error);
-                throw error;
-              }
-            },
-          }),
-        };
-        ctx.extensionToolsByName.set(toolDef.name, toolRecord);
-        loadedTools.push(toolDef.name);
-        loadedToolRecords.push(toolRecord);
-
-        if (shouldAutoRegisterExtensionTool(ctx.baseTier, toolRecord)) {
-          if (registerExtensionToolRecord(ctx, toolRecord, 'reload')) {
-            activatedOnReload++;
-          }
-        }
-      }
-    } catch (error) {
-      for (const toolRecord of loadedToolRecords.toReversed()) {
-        try {
-          unregisterExtensionToolRecord(ctx, toolRecord, { removeDefinition: true });
-        } catch (toolCleanupError) {
-          logger.warn(
-            `Failed to roll back extension tool "${toolRecord.name}" for plugin "${plugin.id}":`,
-            toolCleanupError,
-          );
-        }
-      }
-      ctx.extensionPluginRuntimeById.delete(plugin.id);
-      try {
-        if (plugin.onDeactivateHandler && pluginState === 'activated') {
-          await plugin.onDeactivateHandler(lifecycleContext);
-          pluginState = 'deactivated';
-          runtimeRecord.state = pluginState;
-        }
-      } catch (deactivateError) {
-        logger.warn(
-          `Plugin onDeactivate failed during rollback for ${plugin.id}:`,
-          deactivateError,
-        );
-      }
-      errors.push(`Plugin lifecycle failed for ${plugin.id}: ${String(error)}`);
+    const pluginDomain = `plugin:${plugin.id}`;
+    const lifecycleOk = await activatePluginLifecycle({
+      plugin,
+      pluginFile,
+      pluginDomain,
+      lifecycleContext,
+      pluginStateRef: {
+        get value() {
+          return pluginState;
+        },
+        set value(v: PluginState) {
+          pluginState = v;
+        },
+      },
+      runtimeRecord,
+      baseToolNames,
+      ctx,
+      loadedToolRecords,
+      incrementActivated: () => {
+        activatedOnReload++;
+      },
+      warnings,
+      errors,
+    });
+    if (!lifecycleOk) {
       continue;
     }
 
@@ -763,4 +684,147 @@ function buildPluginLifecycleContext(inputs: PluginLifecycleContextInputs): Plug
       return runtimeData.get(key) as T | undefined;
     },
   };
+}
+
+/**
+ * Lifecycle (onLoad/onValidate/onActivate) + tool registration + rollback for
+ * one plugin. Throws are caught here; the caller's loop simply continues.
+ */
+async function activatePluginLifecycle(pc: {
+  plugin: ExtensionBuilder;
+  pluginFile: string;
+  pluginDomain: string;
+  lifecycleContext: PluginLifecycleContext;
+  pluginStateRef: { value: PluginState };
+  runtimeRecord: ExtensionPluginRuntimeRecord;
+  baseToolNames: Set<string>;
+  ctx: MCPServerContext;
+  loadedToolRecords: ExtensionToolRecord[];
+  incrementActivated: () => void;
+  warnings: string[];
+  errors: string[];
+}): Promise<boolean> {
+  const {
+    plugin,
+    pluginFile,
+    pluginDomain,
+    lifecycleContext,
+    pluginStateRef,
+    runtimeRecord,
+    baseToolNames,
+    ctx,
+    loadedToolRecords,
+    incrementActivated,
+    warnings,
+    errors,
+  } = pc;
+  const pluginId = plugin.id;
+  let pluginState = pluginStateRef.value;
+  try {
+    if (plugin.onLoadHandler) {
+      await plugin.onLoadHandler(lifecycleContext);
+    }
+    pluginState = 'loaded';
+    runtimeRecord.state = pluginState;
+    pluginStateRef.value = pluginState;
+
+    if (plugin.onValidateHandler) {
+      const validation = await plugin.onValidateHandler(lifecycleContext);
+      if (!validation.valid) {
+        warnings.push(`Plugin ${plugin.id} validation failed: ${validation.errors.join('; ')}`);
+        return false; // skip the rest if invalid
+      }
+      pluginState = 'validated';
+      runtimeRecord.state = pluginState;
+      pluginStateRef.value = pluginState;
+    }
+
+    if (plugin.onActivateHandler) {
+      await plugin.onActivateHandler(lifecycleContext);
+      pluginState = 'activated';
+      runtimeRecord.state = pluginState;
+      pluginStateRef.value = pluginState;
+    }
+    ctx.extensionPluginRuntimeById.set(plugin.id, runtimeRecord);
+
+    // Register plugin tools into the extension registry and auto-activate
+    // the subset visible in the current base profile.
+    const loadedTools: string[] = [];
+    for (const toolDef of plugin.tools) {
+      if (baseToolNames.has(toolDef.name)) {
+        pc.warnings.push(
+          `Skip tool "${toolDef.name}" from plugin "${plugin.id}": collides with built-in tool name`,
+        );
+        continue;
+      }
+      if (ctx.extensionToolsByName.has(toolDef.name)) {
+        pc.warnings.push(
+          `Skip duplicate extension tool "${toolDef.name}" from plugin "${plugin.id}"`,
+        );
+        continue;
+      }
+
+      const toolRecord: ExtensionToolRecord = {
+        name: toolDef.name,
+        domain: pluginDomain,
+        source: pluginFile,
+        tool: {
+          name: toolDef.name,
+          description: toolDef.description,
+          inputSchema: toolDef.schema,
+        },
+        profiles: toolDef.profiles ?? plugin.profiles,
+        // Tool-execution hooks: the plugin's before/after hooks gate and can
+        // rewrite calls to ITS OWN tools only (least privilege). Plugins
+        // without hooks get the original handler back unchanged.
+        handler: wrapExtensionToolHandler({
+          pluginId: plugin.id,
+          toolName: toolDef.name,
+          beforeHooks: normalizeHookList(plugin.toolExecuteBeforeHooks),
+          afterHooks: normalizeHookList(plugin.toolExecuteAfterHooks),
+          handler: async (args: Record<string, unknown>) => {
+            try {
+              return await toolDef.handler(args, lifecycleContext);
+            } catch (error) {
+              logger.error(`[extension:${plugin.id}] Tool "${toolDef.name}" failed:`, error);
+              throw error;
+            }
+          },
+        }),
+      };
+      ctx.extensionToolsByName.set(toolDef.name, toolRecord);
+      loadedTools.push(toolDef.name);
+      loadedToolRecords.push(toolRecord);
+
+      if (shouldAutoRegisterExtensionTool(ctx.baseTier, toolRecord)) {
+        if (registerExtensionToolRecord(ctx, toolRecord, 'reload')) {
+          incrementActivated();
+        }
+      }
+    }
+  } catch (error) {
+    for (const toolRecord of loadedToolRecords.toReversed()) {
+      try {
+        unregisterExtensionToolRecord(ctx, toolRecord, { removeDefinition: true });
+      } catch (toolCleanupError) {
+        logger.warn(
+          `Failed to roll back extension tool "${toolRecord.name}" for plugin "${pluginId}":`,
+          toolCleanupError,
+        );
+      }
+    }
+    ctx.extensionPluginRuntimeById.delete(pluginId);
+    try {
+      if (plugin.onDeactivateHandler && pluginStateRef.value === 'activated') {
+        await plugin.onDeactivateHandler(lifecycleContext);
+        pluginStateRef.value = 'deactivated';
+        runtimeRecord.state = pluginStateRef.value;
+      }
+    } catch (deactivateError) {
+      logger.warn(`Plugin onDeactivate failed during rollback for ${pluginId}:`, deactivateError);
+    }
+    errors.push(`Plugin lifecycle failed for ${pluginId}: ${String(error)}`);
+    return false;
+  }
+  return true;
 }
