@@ -164,20 +164,20 @@ const consoleMonitor = {
 
 // ── Class under test ──────────────────────────────────────────────────────────
 
-import { AdvancedHandlersBase } from '@server/domains/network/handlers.base';
 import { ReplayHandlers } from '@server/domains/network/handlers/replay-handlers';
+import { argBool, argNumber } from '@server/domains/shared/parse-args';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
 /**
- * Testable facade over the composition chain: replay methods delegate to the
- * active ReplayHandlers module, while parseNumberArg/parseBooleanArg come from
- * the base chain (AdvancedHandlersBase → NetworkHandlersCore).
+ * Facade over the composition handlers: replay methods delegate to the active
+ * ReplayHandlers module; parse*Arg come from handlers/shared (same functions
+ * the base chain re-exported).
  */
-class TestableAdvancedToolHandlersRuntime extends AdvancedHandlersBase {
+class TestableAdvancedToolHandlersRuntime {
   private replay: ReplayHandlers;
 
   constructor(collector: unknown, _consoleMonitor: unknown) {
-    super(collector as never, _consoleMonitor as never);
+    void collector;
     this.replay = new ReplayHandlers({ consoleMonitor: _consoleMonitor as never });
   }
 
@@ -197,11 +197,16 @@ class TestableAdvancedToolHandlersRuntime extends AdvancedHandlersBase {
     value: unknown,
     options: { defaultValue: number; min?: number; max?: number; integer?: boolean },
   ): number {
-    return this.parseNumberArg(value, options);
+    const raw = argNumber({ value } as Record<string, unknown>, 'value', options.defaultValue);
+    let parsed = typeof raw === 'number' && Number.isFinite(raw) ? raw : options.defaultValue;
+    if (options.integer) parsed = Math.trunc(parsed);
+    if (typeof options.min === 'number') parsed = Math.max(options.min, parsed);
+    if (typeof options.max === 'number') parsed = Math.min(options.max, parsed);
+    return parsed;
   }
 
   public testParseBooleanArg(value: unknown, defaultValue: boolean): boolean {
-    return this.parseBooleanArg(value, defaultValue);
+    return argBool({ value } as Record<string, unknown>, 'value', defaultValue);
   }
 }
 
