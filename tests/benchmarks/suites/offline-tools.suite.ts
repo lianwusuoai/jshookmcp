@@ -31,7 +31,7 @@ const exploitHandlers = new ExploitDevHandlers({} as unknown as MCPServerContext
 
 // RFC 9113 SETTINGS frame with MAX_CONCURRENT_STREAMS(0x3)=100 — same vector the
 // parse benchmark uses, here built from fields and compared byte-for-byte.
-const SETTINGS_EXPECTED_HEX = '0000060400000000000300000064';
+const SETTINGS_EXPECTED_HEX = '000006040000000000000300000064';
 
 const JSDOM_HTML = `<!DOCTYPE html><html><body>
 <ul id="list"><li class="item">one</li><li class="item">two</li><li>three</li></ul>
