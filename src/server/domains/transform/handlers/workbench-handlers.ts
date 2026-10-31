@@ -72,9 +72,14 @@ function readRequiredString(args: Record<string, unknown>, key: string): string 
   return value.trim();
 }
 
-function readSteps(
-  value: unknown,
-): Array<{ op: string; key?: string; keyHex?: string; iv?: string; ivHex?: string }> {
+function readSteps(value: unknown): Array<{
+  op: string;
+  key?: string;
+  keyHex?: string;
+  iv?: string;
+  ivHex?: string;
+  padding?: 'pkcs7' | 'none';
+}> {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error('steps must contain at least one transform step');
   }
@@ -91,6 +96,9 @@ function readSteps(
       ...(typeof record['keyHex'] === 'string' ? { keyHex: record['keyHex'] } : {}),
       ...(typeof record['iv'] === 'string' ? { iv: record['iv'] } : {}),
       ...(typeof record['ivHex'] === 'string' ? { ivHex: record['ivHex'] } : {}),
+      ...(record['padding'] === 'none' || record['padding'] === 'pkcs7'
+        ? { padding: record['padding'] as 'pkcs7' | 'none' }
+        : {}),
     };
   });
 }

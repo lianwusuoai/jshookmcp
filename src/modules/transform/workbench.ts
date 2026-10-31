@@ -15,6 +15,12 @@ export interface TransformWorkbenchStep {
   iv?: string;
   /** AES IV (hex) — alternative to `iv` for aes_cbc_decrypt. */
   ivHex?: string;
+  /**
+   * AES padding mode for aes_cbc_decrypt / aes_ecb_decrypt.
+   * 'pkcs7' (default) — PKCS#7 unpadding; input must be block-aligned padded ciphertext.
+   * 'none' — raw block decrypt for unpadded vectors (e.g. NIST SP 800-38A test blocks).
+   */
+  padding?: 'pkcs7' | 'none';
 }
 
 export interface TransformWorkbenchOptions {
@@ -126,6 +132,7 @@ function normalizeStep(step: TransformWorkbenchStep): TransformWorkbenchStep {
     ...(typeof step.keyHex === 'string' ? { keyHex: step.keyHex } : {}),
     ...(typeof step.iv === 'string' ? { iv: step.iv } : {}),
     ...(typeof step.ivHex === 'string' ? { ivHex: step.ivHex } : {}),
+    ...(step.padding === 'none' || step.padding === 'pkcs7' ? { padding: step.padding } : {}),
   };
 }
 
@@ -144,9 +151,9 @@ function applyStep(buffer: Buffer, step: TransformWorkbenchStep, maxOutputBytes:
     case 'rc4':
       return rc4(buffer, readKey(step));
     case 'aes_cbc_decrypt':
-      return aesDecrypt(buffer, readKey(step), readIv(step));
+      return aesDecrypt(buffer, readKey(step), readIv(step), step.padding ?? 'pkcs7');
     case 'aes_ecb_decrypt':
-      return aesDecrypt(buffer, readKey(step), null);
+      return aesDecrypt(buffer, readKey(step), null, step.padding ?? 'pkcs7');
     case 'zlib_inflate':
       return inflateBounded(buffer, 'zlib', maxOutputBytes);
     case 'gzip_inflate':
@@ -200,19 +207,30 @@ function readIv(step: TransformWorkbenchStep): Buffer {
   throw new Error(`${step.op} requires iv or ivHex`);
 }
 
-function aesDecrypt(buffer: Buffer, key: Buffer, iv: Buffer | null): Buffer {
+function aesDecrypt(
+  buffer: Buffer,
+  key: Buffer,
+  iv: Buffer | null,
+  padding: 'pkcs7' | 'none',
+): Buffer {
   const bitLen = key.length * 8;
   if (bitLen !== 128 && bitLen !== 192 && bitLen !== 256) {
     throw new Error(`AES key must be 16, 24, or 32 bytes (got ${key.length}) for aes-128/192/256`);
   }
+  const autoPadding = padding !== 'none';
+  if (buffer.length % 16 !== 0) {
+    throw new Error(`AES input must be a multiple of 16 bytes (got ${buffer.length})`);
+  }
   if (iv === null) {
     const decipher = createDecipheriv(`aes-${bitLen}-ecb`, key, null);
+    decipher.setAutoPadding(autoPadding);
     return Buffer.concat([decipher.update(buffer), decipher.final()]);
   }
   if (iv.length !== 16) {
     throw new Error(`AES-CBC IV must be 16 bytes (got ${iv.length})`);
   }
   const decipher = createDecipheriv(`aes-${bitLen}-cbc`, key, iv);
+  decipher.setAutoPadding(autoPadding);
   return Buffer.concat([decipher.update(buffer), decipher.final()]);
 }
 
