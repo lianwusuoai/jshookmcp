@@ -295,7 +295,7 @@ function detectCpuid7(): Cpuid7Features | null {
 
 async function readMsr(msrIndex: number): Promise<bigint | null> {
   try {
-    const { byovdManager } = await import('@native/byovd');
+    const { byovdManager } = await import('./ByovdManager');
     if (!byovdManager.isActive()) return null;
 
     const active = byovdManager.getActiveDriver();
@@ -490,7 +490,7 @@ async function verifyPhysicalAccess(allocation: PhysicalAllocation): Promise<boo
   if (allocation.physicalAddress === null || allocation.size < 8) return false;
 
   try {
-    const { byovdManager } = await import('@native/byovd');
+    const { byovdManager } = await import('./ByovdManager');
     if (!byovdManager.isActive()) return false;
 
     const driver = byovdManager.getActiveDriver();
@@ -1636,7 +1636,7 @@ async function resolveVirtualToPhysical(va: bigint): Promise<bigint | null> {
   if (process.platform !== 'win32') return null;
 
   try {
-    const { byovdManager } = await import('@native/byovd');
+    const { byovdManager } = await import('./ByovdManager');
     if (!byovdManager.isActive()) return null;
 
     const driver = byovdManager.getActiveDriver();
@@ -1883,7 +1883,7 @@ export class Hypervisor {
 
     let byovdActive = false;
     try {
-      const { byovdManager } = await import('@native/byovd');
+      const { byovdManager } = await import('./ByovdManager');
       byovdActive = byovdManager.isActive();
     } catch {
       /* BYOVD unavailable */

@@ -19,8 +19,7 @@ import {
   RERANK_NETWORK_MONITOR_BOOST,
   RERANK_NETWORK_GET_REQUESTS_BOOST,
 } from '@src/constants';
-import { getToolDomain } from '@server/ToolCatalog';
-import { getAllManifests } from '@server/registry/index';
+import { getToolDomain } from '@server/registry/views';
 import {
   isBrowserOrNetworkTask,
   isMaintenanceTask,
@@ -29,12 +28,6 @@ import {
 import { isToolActive, getToolDomainFromContext } from '@server/ToolRouter.probe';
 
 // ── Prerequisite Types ──
-
-export interface PrerequisiteEntry {
-  condition: string;
-  check: (state: RoutingState) => boolean;
-  fix: string;
-}
 
 // ── Planned Tool (used by preset sequences) ──
 
@@ -97,60 +90,11 @@ function buildStatelessComputeSequence(
  * Build a real runtime check function from the prerequisite condition string.
  * Returns true when the prerequisite IS satisfied, false when it is not.
  */
-function buildPrerequisiteCheck(condition: string): (state: RoutingState) => boolean {
-  if (condition.includes('Browser must be launched')) {
-    return (state) => state.hasActivePage;
-  }
+// ── Prerequisites moved to ToolRouter.prerequisites.ts (leaf module) so
+// WorkflowPreflight can consume them without the router policy graph —
+// the policy import chain closed the largest registry↔workflow cycle family.
 
-  if (condition.includes('Network monitoring must be enabled')) {
-    return (state) => state.networkEnabled;
-  }
-
-  if (condition.includes('Debugger must be enabled')) {
-    return (state) => state.hasActivePage;
-  }
-
-  if (condition.includes('Debugger must be attached')) {
-    return (state) => state.hasActivePage;
-  }
-
-  if (condition.includes('Page must be navigated')) {
-    return (state) => state.hasActivePage;
-  }
-
-  if (condition.includes('WebSocket monitoring')) {
-    return (state) => state.hasActivePage;
-  }
-
-  // Unknown condition — cannot be checked at runtime, assume not satisfied
-  return () => false;
-}
-
-// ── Prerequisite Cache ──
-
-let cachedPrerequisites: Record<string, PrerequisiteEntry[]> | null = null;
-
-/**
- * Aggregate prerequisite declarations from domain manifests.
- * Cached lazily — manifests are immutable at runtime.
- */
-export function getEffectivePrerequisites(): Record<string, PrerequisiteEntry[]> {
-  if (cachedPrerequisites) return cachedPrerequisites;
-  const merged: Record<string, PrerequisiteEntry[]> = {};
-  for (const m of getAllManifests()) {
-    if (m.prerequisites) {
-      for (const [toolName, entries] of Object.entries(m.prerequisites)) {
-        merged[toolName] = entries.map((e) => ({
-          condition: e.condition,
-          check: buildPrerequisiteCheck(e.condition),
-          fix: e.fix,
-        }));
-      }
-    }
-  }
-  cachedPrerequisites = merged;
-  return cachedPrerequisites;
-}
+export { getEffectivePrerequisites } from '@server/ToolRouter.prerequisites';
 
 // ── Workflow Tool Sequence Builders ──
 

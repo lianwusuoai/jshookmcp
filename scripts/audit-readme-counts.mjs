@@ -225,10 +225,10 @@ export function reportAudit(result, { expectedToolCount }) {
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 
 async function main() {
-  // Imported lazily: generate-metadata.mjs imports this module, and the CLI path
-  // needs its registry probe, which is the slow part. Static imports would create
-  // a cycle and would also run the probe on every pure-function use.
-  const { loadRegistrySummary } = await import('./generate-metadata.mjs');
+  // Leaf module: the audit CLI needs the registry probe without the rest of
+  // generate-metadata (which statically imports this module's pure functions —
+  // the probe lived there and created the cycle).
+  const { loadRegistrySummary } = await import('./registry-probe.mjs');
   const summary = await loadRegistrySummary();
 
   const files = [

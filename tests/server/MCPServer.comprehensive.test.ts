@@ -160,6 +160,11 @@ vi.mock('@src/server/ToolHandlerMap', () => ({
   createToolHandlerMap: mocks.createToolHandlerMap,
 }));
 
+vi.mock('@src/server/registry/views', () => ({
+  allTools: [],
+  getToolDomain: mocks.getToolDomain,
+}));
+
 vi.mock('@src/server/registry/index', () => ({
   getAllManifests: () => mocks.allManifests,
   getAllRegistrations: () => [],

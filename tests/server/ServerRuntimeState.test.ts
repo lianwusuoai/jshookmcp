@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTestUrl } from '@tests/shared/test-urls';
 
-import {
-  ServerRuntimeState,
-  restorePendingDomainActivations,
-} from '@server/runtime/ServerRuntimeState';
+import { ServerRuntimeState } from '@server/runtime/ServerRuntimeState';
+import { restorePendingDomainActivations } from '@server/runtime/restorePendingDomainActivations';
 
 const state = vi.hoisted(() => ({
   ensureDomainLoaded: vi.fn(async () => null),
@@ -198,7 +196,7 @@ describe('ServerRuntimeState', () => {
     runtimeState.recordToolCall('called_tool', { beta: 2, alpha: 1, _meta: { sessionId: 's1' } });
     runtimeState.recordToolCall('uncatalogued_tool', {});
 
-    const summary = runtimeState.getCoverageSummary(ctx);
+    const summary = runtimeState.getCoverageSummary(ctx, ['called_tool', 'catalog_tool']);
     expect(summary.calledCount).toBe(2);
     expect(summary.called.called_tool?.lastArgsKeys).toEqual(['alpha', 'beta']);
     expect(summary.uncataloguedCalls).toEqual(['uncatalogued_tool']);

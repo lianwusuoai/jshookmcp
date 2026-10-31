@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { auditReadmeCounts, reportAudit } from './audit-readme-counts.mjs';
+// Loaded lazily: audit-readme-counts.mjs imports this module for its CLI
+// registry probe, so a static import here re-creates the scripts cycle the
+// audit side already broke with its own lazy import.
+const loadAuditReadmeCounts = async () => await import('./audit-readme-counts.mjs');
 
 const scriptDirUrl = new URL('.', import.meta.url);
 const projectRootUrl = new URL('../', scriptDirUrl);
 const projectRoot = fileURLToPath(projectRootUrl);
-const require = createRequire(import.meta.url);
-
 const packageJsonPath = join(projectRoot, 'package.json');
 const serverJsonPath = join(projectRoot, 'server.json');
 const readmePath = join(projectRoot, 'README.md');
@@ -21,25 +20,6 @@ const readmeZhPath = join(projectRoot, 'README.zh.md');
 const README_SYNC_START = '<!-- metadata-sync:start -->';
 const README_SYNC_END = '<!-- metadata-sync:end -->';
 const toolReferenceUrl = 'https://vmoranv.github.io/jshookmcp/reference/';
-const registryMetadataPlatform = 'win32';
-
-const registryProbe = `
-import { initRegistry, getAllManifests, getAllRegistrations } from './src/server/registry/index.ts';
-
-(async () => {
-  await initRegistry();
-
-  const manifests = [...getAllManifests()].sort((a, b) => a.domain.localeCompare(b.domain));
-  const registrations = [...getAllRegistrations()];
-
-  console.log(JSON.stringify({
-    domainCount: manifests.length,
-    toolCount: registrations.length,
-    domains: manifests.map((manifest) => manifest.domain),
-  }, null, 2));
-})();
-`;
-
 function stringifyJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -62,38 +42,8 @@ async function readText(path) {
   return readFile(path, 'utf8');
 }
 
-export async function loadRegistrySummary() {
-  const packageJson = await readJson(packageJsonPath);
-  const tsxPackagePath = require.resolve('tsx/package.json');
-  const tsxCliPath = join(dirname(tsxPackagePath), 'dist', 'cli.mjs');
-  const result = spawnSync(process.execPath, [tsxCliPath, '--eval', registryProbe], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      JSHOOK_REGISTRY_PLATFORM: registryMetadataPlatform,
-      LOG_LEVEL: 'error',
-    },
-  });
-
-  if (result.status !== 0) {
-    const details = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
-    throw new Error(`Failed to load registry summary via tsx.${details ? `\n${details}` : ''}`);
-  }
-
-  const stdout = result.stdout.trim();
-  if (!stdout) {
-    throw new Error('Registry summary probe returned empty stdout.');
-  }
-
-  const summary = JSON.parse(stdout);
-  return {
-    packageVersion: packageJson.version,
-    domainCount: summary.domainCount,
-    toolCount: summary.toolCount,
-    domains: summary.domains,
-  };
-}
+import { loadRegistrySummary } from './registry-probe.mjs';
+export { loadRegistrySummary };
 
 export function buildDescription() {
   return `MCP server with built-in tools across multiple domains for AI-assisted JavaScript analysis and security analysis — browser automation, CDP debugging, network monitoring, JS hooks, code analysis, and workflow orchestration`;
@@ -315,7 +265,7 @@ export async function checkMetadata(options = {}) {
 
   // The sync block is only ONE of the two places the tool count lives. The other
   // is hand-written prose, which nothing else validates — see audit-readme-counts.mjs.
-  const prose = auditReadmeCounts({
+  const prose = (await loadAuditReadmeCounts()).auditReadmeCounts({
     expectedToolCount: state.summary.toolCount,
     files: [
       { name: 'README.md', lang: 'en', text: state.files['README.md'].actual },
@@ -328,7 +278,9 @@ export async function checkMetadata(options = {}) {
       `[metadata] registry summary: version=${state.summary.packageVersion}, domains=${state.summary.domainCount}, tools=${state.summary.toolCount}`,
     );
     if (prose.aborts.length > 0) {
-      reportAudit(prose, { expectedToolCount: state.summary.toolCount });
+      (await loadAuditReadmeCounts()).reportAudit(prose, {
+        expectedToolCount: state.summary.toolCount,
+      });
     } else if (mismatches.length === 0 && prose.failures.length === 0) {
       console.log('[metadata] OK: metadata is in sync.');
     } else {
@@ -336,7 +288,9 @@ export async function checkMetadata(options = {}) {
         console.error(`[metadata] STALE: ${mismatches.join(', ')}`);
       }
       if (prose.failures.length > 0) {
-        reportAudit(prose, { expectedToolCount: state.summary.toolCount });
+        (await loadAuditReadmeCounts()).reportAudit(prose, {
+          expectedToolCount: state.summary.toolCount,
+        });
       }
     }
   }
@@ -363,7 +317,7 @@ export async function syncMetadata() {
   // `sync` rewrites the generated block only. Prose is authored text and is left
   // alone, so a stale prose count survives a sync by design — report it loudly
   // here rather than letting the next `check` be the first time anyone hears.
-  const prose = auditReadmeCounts({
+  const prose = (await loadAuditReadmeCounts()).auditReadmeCounts({
     expectedToolCount: state.summary.toolCount,
     files: [
       { name: 'README.md', lang: 'en', text: state.files['README.md'].actual },
@@ -401,7 +355,9 @@ async function main() {
     console.log(`[metadata] Updated: ${result.changedFiles.join(', ')}`);
   }
   if (result.prose.aborts.length > 0 || result.prose.failures.length > 0) {
-    reportAudit(result.prose, { expectedToolCount: result.summary.toolCount });
+    (await loadAuditReadmeCounts()).reportAudit(result.prose, {
+      expectedToolCount: result.summary.toolCount,
+    });
     console.error('[metadata] WARNING: sync does not rewrite prose — fix the lines above by hand.');
   }
 }

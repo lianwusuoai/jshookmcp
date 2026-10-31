@@ -5,30 +5,27 @@
  * Supports: Chrome/Chromium, general macOS processes
  */
 
-import { exec, execFile, spawn } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from '@utils/logger';
 import {
-  DEBUG_PORT_CANDIDATES,
   DEFAULT_DEBUG_PORT,
-  PROCESS_LIST_MAX_BUFFER_BYTES,
-  PROCESS_LAUNCH_WAIT_MS,
   EXTERNAL_TOOL_PROBE_TIMEOUT_MS,
   NATIVE_ADMIN_CHECK_TIMEOUT_MS,
 } from '@src/constants';
 import { ScriptLoader } from '@native/ScriptLoader';
-import { ProcessRegistry } from '@utils/ProcessRegistry';
-import { buildChromiumDebugLaunch } from '@modules/process/chromium-launch';
+import {
+  checkDebugPortPosix,
+  findChromeProcessesPosix,
+  findProcessesPosix,
+  launchWithDebugPosix,
+} from '@modules/process/posix-debug-launch';
 import type { ProcessInfo, WindowInfo } from '@modules/process/ProcessManager';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 /** Strip shell metacharacters from a grep pattern to prevent command injection. */
-function sanitizePattern(s: string): string {
-  return String(s || '').replace(/[^\w\s.@/\-:,+]/g, '');
-}
-
 /** Validate and normalize a PID value. Throws on invalid input. */
 function safePid(pid: number): number {
   const n = Math.trunc(Number(pid));
@@ -73,44 +70,7 @@ export class MacProcessManager {
    * Enumerate all processes matching a pattern
    */
   async findProcesses(pattern: string): Promise<ProcessInfo[]> {
-    try {
-      const safePattern = sanitizePattern(pattern);
-      const { stdout } = await execAsync(
-        `ps aux | grep -i "${safePattern}" | grep -v grep || true`,
-        { maxBuffer: PROCESS_LIST_MAX_BUFFER_BYTES },
-      );
-
-      const processes: ProcessInfo[] = [];
-      const lines = stdout
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim());
-
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 11) {
-          const pid = parseInt(parts[1] || '0', 10);
-          if (isNaN(pid)) continue; // skip header line
-          const cpu = parseFloat(parts[2] || '0');
-          const mem = parseFloat(parts[3] || '0');
-          const command = parts.slice(10).join(' ');
-
-          processes.push({
-            pid,
-            name: parts[10] || command.split(' ')[0] || 'unknown',
-            commandLine: command,
-            cpuUsage: cpu,
-            memoryUsage: mem * 1024 * 1024, // Estimated from %MEM (imprecise)
-          });
-        }
-      }
-
-      logger.info(`Found ${processes.length} processes matching '${pattern}'`);
-      return processes;
-    } catch (error) {
-      logger.error(`Failed to find processes with pattern '${pattern}':`, error);
-      return [];
-    }
+    return findProcessesPosix(pattern, execAsync);
   }
 
   /**
@@ -288,61 +248,24 @@ export class MacProcessManager {
    * Find Chrome/Chromium processes
    */
   async findChromeProcesses(): Promise<ChromeProcess> {
-    const result: ChromeProcess = {
-      rendererProcesses: [],
-      utilityProcesses: [],
-    };
-
-    try {
-      const processes = await this.findProcesses('chrome');
-
-      // Batch-fetch detailed info to avoid N+1 sequential exec calls
-      const detailedInfos = await Promise.all(
-        processes.map((proc) => this.getProcessByPid(proc.pid)),
-      );
-
-      for (let i = 0; i < processes.length; i++) {
-        const proc = processes[i];
-        const detailedInfo = detailedInfos[i];
-
-        if (detailedInfo?.commandLine) {
-          const cmd = detailedInfo.commandLine.toLowerCase();
-
-          if (cmd.includes('--type=renderer')) {
-            result.rendererProcesses.push({ ...proc, ...detailedInfo });
-          } else if (cmd.includes('--type=gpu-process')) {
-            result.gpuProcess = { ...proc, ...detailedInfo };
-          } else if (cmd.includes('--type=utility')) {
-            result.utilityProcesses.push({ ...proc, ...detailedInfo });
-          } else if (!cmd.includes('--type=')) {
-            result.mainProcess = { ...proc, ...detailedInfo };
-          }
-        } else {
-          if (!result.mainProcess) {
-            result.mainProcess = proc;
-          }
-        }
+    // Shared enumeration/classification; platform-specific target-window pick.
+    const result = await findChromeProcessesPosix(
+      (pattern) => this.findProcesses(pattern),
+      (pid) => this.getProcessByPid(pid),
+    );
+    if (result.mainProcess) {
+      const windows = await this.getProcessWindowsCG(result.mainProcess.pid);
+      if (windows.length > 0) {
+        result.targetWindow = windows[0];
       }
-
-      // Find target window
-      if (result.mainProcess) {
-        const windows = await this.getProcessWindowsCG(result.mainProcess.pid);
-        if (windows.length > 0) {
-          result.targetWindow = windows[0];
-        }
-      }
-
-      logger.info('Chrome processes found:', {
-        main: result.mainProcess?.pid,
-        renderers: result.rendererProcesses.length,
-        hasTargetWindow: !!result.targetWindow,
-      });
-
-      return result;
-    } catch (error) {
-      logger.error('Failed to find Chrome processes:', error);
-      return result;
     }
+    logger.info('Chrome processes found:', {
+      main: result.mainProcess?.pid,
+      renderers: result.rendererProcesses.length,
+      hasTargetWindow: !!result.targetWindow,
+    });
+
+    return result;
   }
 
   /**
@@ -372,84 +295,35 @@ export class MacProcessManager {
    * Check if a process has a debug port enabled
    */
   async checkDebugPort(pid: number, options?: { commandLine?: string }): Promise<number | null> {
-    try {
-      pid = safePid(pid);
-      const commandLine =
-        options?.commandLine ?? (await this.getProcessCommandLine(pid)).commandLine;
-
-      if (commandLine) {
-        const match = commandLine.match(/--remote-debugging-port=(\d+)/);
-        if (match?.[1]) {
-          return parseInt(match[1], 10);
-        }
-      }
-
-      // Check listening ports using lsof
-      const { stdout } = await execAsync(
-        `lsof -Pan -p ${pid} -i 2>/dev/null | grep LISTEN || true`,
-        { maxBuffer: 1024 * 1024 },
-      );
-
-      // Common debug ports
-      for (const port of DEBUG_PORT_CANDIDATES) {
-        if (stdout.includes(`:${port}`)) {
-          return port;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      logger.error(`Failed to check debug port for PID ${pid}:`, error);
-      return null;
-    }
+    return checkDebugPortPosix(
+      pid,
+      `lsof -Pan -p ${pid} -i 2>/dev/null | grep LISTEN || true`,
+      safePid,
+      execAsync,
+      async (p) => {
+        const { commandLine } = await this.getProcessCommandLine(p);
+        return commandLine;
+      },
+      options,
+    );
   }
 
   /**
-   * Launch process with debugging enabled
+   * Launch process with debugging enabled.
+   * Shared POSIX implementation (see posix-debug-launch.ts) — the two platform
+   * managers only differ in how they resolve a PID to ProcessInfo.
    */
   async launchWithDebug(
     executablePath: string,
     debugPort: number = DEFAULT_DEBUG_PORT,
     args: string[] = [],
   ): Promise<ProcessInfo | null> {
-    try {
-      const plan = buildChromiumDebugLaunch(executablePath, debugPort, args);
-
-      const child = spawn(executablePath, plan.debugArgs, {
-        detached: true,
-        stdio: 'ignore',
-      });
-
-      child.unref();
-      ProcessRegistry.register(child);
-
-      await new Promise((resolve) => setTimeout(resolve, PROCESS_LAUNCH_WAIT_MS));
-
-      if (!child.pid) {
-        logger.error(`Failed to spawn process: PID is undefined for ${executablePath}`);
-        return null;
-      }
-      // Fast-fail (issue #206): a target that died immediately must not be
-      // reported as a live debuggable process.
-      if (typeof child.exitCode === 'number' || typeof child.signalCode === 'string') {
-        logger.error(`Debug launch target exited immediately: ${executablePath}`, {
-          exitCode: child.exitCode,
-          signalCode: child.signalCode,
-        });
-        return null;
-      }
-      const process = await this.getProcessByPid(child.pid);
-
-      logger.info(`Launched process with debug port ${debugPort}:`, {
-        pid: child.pid,
-        executable: executablePath,
-      });
-
-      return process;
-    } catch (error) {
-      logger.error('Failed to launch process with debug:', error);
-      return null;
-    }
+    return launchWithDebugPosix(
+      executablePath,
+      (pid) => this.getProcessByPid(pid),
+      debugPort,
+      args,
+    );
   }
 
   /**

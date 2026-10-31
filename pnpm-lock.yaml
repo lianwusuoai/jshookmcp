@@ -192,9 +192,6 @@ importers:
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
-      binaryen:
-        specifier: ^132.0.0
-        version: 132.0.0
       camoufox-js:
         specifier: ^0.11.1
         version: 0.11.5(playwright-core@1.63.0)
@@ -2304,10 +2301,6 @@ packages:
 
   bidi-js@1.1.0:
     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
-
-  binaryen@132.0.0:
-    resolution: {integrity: sha512-4Usg7yEvwO3FMso3Oov6qkOOHSod1IEv+boKkh77kTljM+eNBouqCTbqWswGzbG+vDNO/b/v2C4gfEh1WgB9Lg==}
-    hasBin: true
 
   birpc@2.9.0:
     resolution: {integrity: sha512-KrayHS5pBi69Xi9JmvoqrIgYGDkD6mcSe/i6YKi3w5kekCLzrX4+nawcXqrj2tIp50Kw/mT/s3p+GVK0A0sKxw==}
@@ -5868,9 +5861,6 @@ snapshots:
   bidi-js@1.1.0:
     dependencies:
       require-from-string: 2.0.2
-
-  binaryen@132.0.0:
-    optional: true
 
   birpc@2.9.0: {}
 

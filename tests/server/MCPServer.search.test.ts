@@ -184,6 +184,172 @@ vi.mock('@server/registry/index', () => ({
   ],
 }));
 
+vi.mock('@server/registry/state', () => ({
+  getAllDomains: () => new Set(['browser', 'network', 'workflow']),
+  getAllKnownDomains: () => new Set(['browser', 'network', 'workflow']),
+  ensureDomainLoaded: vi.fn().mockResolvedValue(null),
+  getRegistrationByName: (name: string) => {
+    const definitions = new Map([
+      ['browser_launch', tool('browser_launch', 'Launch a browser')],
+      ['page_navigate', tool('page_navigate', 'Navigate a page')],
+      ['network_enable', tool('network_enable', 'Enable network monitoring')],
+      ['network_get_requests', tool('network_get_requests', 'Inspect network requests')],
+      ['get_token_budget_stats', tool('get_token_budget_stats', 'Inspect token budget state')],
+    ]);
+    const candidate = definitions.get(name);
+    return candidate ? { tool: candidate } : undefined;
+  },
+  getLoadedRegistrations: () => [
+    { domain: 'browser', tool: tool('browser_launch') },
+    { domain: 'browser', tool: tool('page_navigate') },
+    { domain: 'network', tool: tool('network_enable') },
+    { domain: 'network', tool: tool('network_get_requests') },
+  ],
+  ensureAllDomainsLoaded: vi.fn().mockResolvedValue(undefined),
+  getLoadedManifests: () => [
+    {
+      domain: 'browser',
+      workflowRule: {
+        patterns: [/(browser|page|navigate|screenshot|click|type|scrape)/i],
+        priority: 90,
+        tools: [
+          'page_navigate',
+          'page_evaluate',
+          'browser_jsdom_parse',
+          'console_get_logs',
+          'page_click',
+          'page_type',
+          'page_screenshot',
+        ],
+        hint: 'Browser automation workflow',
+      },
+      prerequisites: {
+        page_navigate: [
+          {
+            condition: 'Browser must be launched',
+            fix: 'Call browser_launch or browser_attach first',
+          },
+        ],
+      },
+    },
+    {
+      domain: 'network',
+      workflowRule: {
+        patterns: [/(capture|intercept|monitor|hook).*(network|request|response|api|traffic)/i],
+        priority: 100,
+        tools: [
+          'run_extension_workflow',
+          'network_enable',
+          'page_navigate',
+          'network_get_requests',
+        ],
+        hint: 'Network capture workflow',
+      },
+      prerequisites: {
+        network_get_requests: [
+          {
+            condition: 'Browser must be launched',
+            fix: 'Call browser_launch or browser_attach first',
+          },
+          { condition: 'Network monitoring must be enabled', fix: 'Call network_enable first' },
+        ],
+      },
+    },
+  ],
+}));
+
+vi.mock('@server/registry/views', () => ({
+  getLoadedDomainNames: () => new Set(['browser', 'network', 'workflow']),
+  getAllKnownDomains: () => new Set(['browser', 'network', 'workflow']),
+  getRegistrationByName: (name: string) => {
+    const definitions = new Map([
+      ['browser_launch', tool('browser_launch', 'Launch a browser')],
+      ['page_navigate', tool('page_navigate', 'Navigate a page')],
+      ['network_enable', tool('network_enable', 'Enable network monitoring')],
+      ['network_get_requests', tool('network_get_requests', 'Inspect network requests')],
+      ['get_token_budget_stats', tool('get_token_budget_stats', 'Inspect token budget state')],
+    ]);
+    const candidate = definitions.get(name);
+    return candidate ? { tool: candidate } : undefined;
+  },
+  getLoadedRegistrations: () => [
+    { domain: 'browser', tool: tool('browser_launch') },
+    { domain: 'browser', tool: tool('page_navigate') },
+    { domain: 'network', tool: tool('network_enable') },
+    { domain: 'network', tool: tool('network_get_requests') },
+  ],
+  getAllManifests: () => [
+    {
+      domain: 'browser',
+      workflowRule: {
+        patterns: [/(browser|page|navigate|screenshot|click|type|scrape)/i],
+        priority: 90,
+        tools: [
+          'page_navigate',
+          'page_evaluate',
+          'browser_jsdom_parse',
+          'console_get_logs',
+          'page_click',
+          'page_type',
+          'page_screenshot',
+        ],
+        hint: 'Browser automation workflow',
+      },
+      prerequisites: {
+        page_navigate: [
+          {
+            condition: 'Browser must be launched',
+            fix: 'Call browser_launch or browser_attach first',
+          },
+        ],
+      },
+    },
+    {
+      domain: 'network',
+      workflowRule: {
+        patterns: [/(capture|intercept|monitor|hook).*(network|request|response|api|traffic)/i],
+        priority: 100,
+        tools: [
+          'run_extension_workflow',
+          'network_enable',
+          'page_navigate',
+          'network_get_requests',
+        ],
+        hint: 'Network capture workflow',
+      },
+      prerequisites: {
+        network_get_requests: [
+          {
+            condition: 'Browser must be launched',
+            fix: 'Call browser_launch or browser_attach first',
+          },
+          { condition: 'Network monitoring must be enabled', fix: 'Call network_enable first' },
+        ],
+      },
+    },
+  ],
+  getToolDomain: (name: string) => {
+    const defs = new Map([
+      ['browser_launch', 'browser'],
+      ['page_navigate', 'browser'],
+      ['network_enable', 'network'],
+      ['network_get_requests', 'network'],
+      ['get_token_budget_stats', 'system'],
+    ]);
+    return defs.get(name) ?? null;
+  },
+  buildToolDomainMap: () => {
+    const defs: Array<[string, string]> = [
+      ['browser_launch', 'browser'],
+      ['page_navigate', 'browser'],
+      ['network_enable', 'network'],
+      ['network_get_requests', 'network'],
+      ['get_token_budget_stats', 'system'],
+    ];
+    return new Map(defs);
+  },
+}));
+
 vi.mock('@server/ToolSearch', () => ({
   ToolSearchEngine: class MockToolSearchEngine {
     constructor(...args: any[]) {

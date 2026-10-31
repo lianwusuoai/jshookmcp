@@ -1,8 +1,20 @@
+/** Declarative workflow contract shared by the runtime and extension SDK. */
+
 export interface RetryPolicy {
   maxAttempts: number;
   backoffMs: number;
   multiplier?: number;
 }
+
+/** Tool inputs may be literal values or `${step.field}` template strings. */
+export type ToolNodeInput =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | Record<string, unknown>
+  | unknown[];
 
 export type WorkflowNodeType = 'tool' | 'sequence' | 'parallel' | 'branch' | 'fallback';
 
@@ -10,7 +22,7 @@ export interface ToolNode {
   readonly kind: 'tool';
   readonly id: string;
   readonly toolName: string;
-  readonly input?: Record<string, unknown>;
+  readonly input?: Record<string, ToolNodeInput>;
   readonly inputFrom?: Record<string, string>;
   readonly timeoutMs?: number;
   readonly retry?: RetryPolicy;
@@ -47,13 +59,6 @@ export interface FallbackNode {
 }
 
 export type WorkflowNode = ToolNode | SequenceNode | ParallelNode | BranchNode | FallbackNode;
-
-export interface ToolNodeOptions {
-  input?: Record<string, unknown>;
-  inputFrom?: Record<string, string>;
-  retry?: RetryPolicy;
-  timeoutMs?: number;
-}
 
 export interface WorkflowExecutionContext {
   readonly workflowRunId: string;
@@ -117,8 +122,15 @@ export interface WorkflowContract {
   onError?(ctx: WorkflowExecutionContext, error: Error): Promise<void> | void;
 }
 
+export interface ToolNodeOptions {
+  input?: Record<string, ToolNodeInput>;
+  inputFrom?: Record<string, string>;
+  retry?: RetryPolicy;
+  timeoutMs?: number;
+}
+
 export interface ToolStep {
-  input(input: Record<string, unknown>): this;
+  input(input: Record<string, ToolNodeInput>): this;
   inputFrom(mapping: Record<string, string>): this;
   retry(policy: RetryPolicy): this;
   timeout(ms: number): this;
@@ -186,7 +198,7 @@ function setup<T>(target: T, fn?: (value: T) => void): T {
 
 function createToolBuilder(id: string, toolName: string): ToolBuilder {
   const step = {} as ToolBuilder;
-  let input: Record<string, unknown> | undefined;
+  let input: Record<string, ToolNodeInput> | undefined;
   let inputFrom: Record<string, string> | undefined;
   let retry: RetryPolicy | undefined;
   let timeoutMs: number | undefined;

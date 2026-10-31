@@ -23,6 +23,22 @@ vi.mock('@server/ToolCatalog', () => ({
   }),
 }));
 
+// activation.ttl imports getToolDomain from registry/views (cycle-free leaf);
+// mirror the ToolCatalog mock onto it.
+vi.mock('@server/registry/views', () => ({
+  getToolDomain: vi.fn((name: string) => {
+    const map: Record<string, string> = {
+      page_navigate: 'browser',
+      page_evaluate: 'browser',
+      page_click: 'browser',
+      debugger_pause: 'debugger',
+      debugger_resume: 'debugger',
+      network_get_requests: 'network',
+    };
+    return map[name] ?? null;
+  }),
+}));
+
 import {
   startDomainTtl,
   refreshDomainTtl,

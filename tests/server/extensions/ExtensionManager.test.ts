@@ -29,6 +29,13 @@ vi.mock('@server/ToolCatalog', () => ({
   allTools: state.allTools,
 }));
 
+// ExtensionManager imports allTools from registry/views (cycle-free leaf);
+// mirror the ToolCatalog mock onto it.
+vi.mock('@server/registry/views', () => ({
+  allTools: state.allTools,
+  getToolDomain: vi.fn(() => null),
+}));
+
 vi.mock('@utils/logger', () => ({
   logger: state.logger,
 }));

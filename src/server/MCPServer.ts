@@ -58,11 +58,9 @@ import {
   RuntimeSnapshotScheduler,
   getStateDir,
 } from '@server/persistence/RuntimeSnapshotScheduler';
-import {
-  ServerRuntimeState,
-  restorePendingDomainActivations,
-} from '@server/runtime/ServerRuntimeState';
+import { ServerRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { BrowserSessionCoordinator } from '@server/runtime/BrowserSessionCoordinator';
+import { restorePendingDomainActivations } from '@server/runtime/restorePendingDomainActivations';
 import {
   BrowserFleetRouter,
   getConfiguredBrowserFleetLeaseStore,
@@ -108,25 +106,25 @@ export interface MCPServerRuntimeOptions {
 
 export class MCPServer implements MCPServerContext {
   public readonly config: Config;
-  public readonly server: McpServer;
+  public server!: McpServer;
   private readonly cache: CacheManager;
   public readonly tokenBudget: TokenBudgetManager;
   public readonly unifiedCache: UnifiedCacheManager;
   public readonly detailedData: DetailedDataManager;
   public readonly eventBus: EventBus<ServerEventMap>;
-  public readonly samplingBridge: LLMSamplingBridge;
-  public readonly elicitationBridge: ElicitationBridge;
+  public samplingBridge!: LLMSamplingBridge;
+  public elicitationBridge!: ElicitationBridge;
   public readonly selectedTools: Tool[];
   public enabledDomains: Set<string>;
-  public readonly router: ToolExecutionRouter;
-  public readonly contextGuard: ToolCallContextGuard;
+  public router!: ToolExecutionRouter;
+  public contextGuard!: ToolCallContextGuard;
   public readonly circuitBreaker = new ToolCircuitBreaker();
   /** MCP 2.0 Tasks protocol — background scheduler for long-running tool operations. */
   public readonly taskManager: TaskManager;
   private readonly circuitBrokenTools = new Set<string>();
   /** Offloads large response data (>512KB) to disk / DetailedDataManager to keep context lean. */
-  public readonly largeDataOffloader: LargeDataOffloader;
-  public readonly handlerDeps: ToolHandlerDeps;
+  public largeDataOffloader!: LargeDataOffloader;
+  public handlerDeps!: ToolHandlerDeps;
   public readonly toolAutocompleteHandlers = new Map<
     string,
     Record<string, (value: string) => string[] | Promise<string[]>>
@@ -345,6 +343,19 @@ export class MCPServer implements MCPServerContext {
 
     // Build handlerDeps for ALL domains (loaded + unloaded) using build-time metadata.
     // Loaded domains use manifest.ensure() directly; unloaded domains lazy-load on first access.
+    this.initDomainProxies();
+    this.initExecutionPipeline(config);
+    this.initMcpServerShell(config);
+    this.initObservabilityForwarding();
+    this.initRuntimeInstances(config, runtimeOptions);
+    this.initEventSubscriptions();
+    this.registerTools();
+  }
+
+  // ── constructor phases (split from the 331-line constructor; pure move) ──
+
+  /** Domain dep proxies for all 36 domains (loaded + unloaded). */
+  private initDomainProxies(): void {
     const depsEntries: Array<[string, unknown]> = [];
     const manifests = getAllManifests();
     const loadedByDomain = new Map(manifests.map((m) => [m.domain, m]));
@@ -409,7 +420,10 @@ export class MCPServer implements MCPServerContext {
     this.handlerDeps = Object.fromEntries(depsEntries) as ToolHandlerDeps;
     // Expose the task scheduler to domain bind closures (deps.taskManager).
     (this.handlerDeps as Record<string, unknown>)['taskManager'] = this.taskManager;
+  }
 
+  /** Router, context guard, large-data offloader. */
+  private initExecutionPipeline(config: Config): void {
     const selectedToolNames = new Set(this.selectedTools.map((t) => t.name));
     this.router = new ToolExecutionRouter(
       createToolHandlerMap(this.handlerDeps, selectedToolNames),
@@ -442,7 +456,10 @@ export class MCPServer implements MCPServerContext {
         ? new Set(config.offloader.excludeTools)
         : undefined,
     });
+  }
 
+  /** MCP SDK server shell, log transport, circuit breaker hooks. */
+  private initMcpServerShell(config: Config): void {
     this.server = new McpServer(
       { name: config.mcp.name, version: config.mcp.version },
       {
@@ -487,7 +504,10 @@ export class MCPServer implements MCPServerContext {
         this.circuitBreakerReactivate(toolName);
       }
     });
+  }
 
+  /** Client log forwarding + LLM bridges + activation controller. */
+  private initObservabilityForwarding(): void {
     // Forward structured logs to the MCP client (only after initialize handshake)
     this.server.server.oninitialized = () => {
       this.clientInitialized = true;
@@ -527,7 +547,10 @@ export class MCPServer implements MCPServerContext {
     // registered by getSearchEngine() when the first search builds the engine
     // — the engine's own tracker is the one recordSearch writes to, so a
     // separately-constructed instance here would never see a record.
+  }
 
+  /** Snapshot scheduler, runtime state, fleet router, session coordinator. */
+  private initRuntimeInstances(config: Config, runtimeOptions: MCPServerRuntimeOptions): void {
     // Snapshot scheduler for StateBoard + EvidenceGraph persistence
     const stateDir = getStateDir();
     const snapshotScheduler = new RuntimeSnapshotScheduler();
@@ -583,7 +606,10 @@ export class MCPServer implements MCPServerContext {
         await restorePendingDomainActivations(this);
       })
       .catch((err) => logger.warn('snapshot scheduler start failed:', err));
+  }
 
+  /** EventBus subscriptions: progress / evidence / pruning notifications. */
+  private initEventSubscriptions(): void {
     this.eventBus.on('tool:progress', async (payload) => {
       try {
         await this.server.server.notification({

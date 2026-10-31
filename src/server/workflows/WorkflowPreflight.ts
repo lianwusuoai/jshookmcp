@@ -1,6 +1,8 @@
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { ReverseEvidenceGraph } from '@server/evidence/ReverseEvidenceGraph';
-import { getEffectivePrerequisites } from '@server/ToolRouter.policy';
+// Leaf module, not ToolRouter.policy: the policy import chain reaches
+// every domain manifest and would close the registry↔workflow cycle family.
+import { getEffectivePrerequisites } from '@server/ToolRouter.prerequisites';
 import type { getRoutingState } from '@server/ToolRouter.probe';
 import type { ToolNode, WorkflowNode } from '@server/workflows/WorkflowContract';
 import type { PreflightWarning } from '@server/workflows/WorkflowEngine.types';

@@ -4,7 +4,7 @@
 
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { WorkflowRouteMetadata } from '@server/workflows/WorkflowContract';
-import { getAllManifests } from '@server/registry/index';
+import { getLoadedManifests } from '@server/registry/state';
 
 // ── Workflow Detection Types ──
 
@@ -56,7 +56,7 @@ const INTENT_CACHE_MAX = 64;
 export function getEffectiveWorkflowRules(): WorkflowRule[] {
   if (cachedWorkflowRules) return cachedWorkflowRules;
   const rules: WorkflowRule[] = [];
-  for (const m of getAllManifests()) {
+  for (const m of getLoadedManifests()) {
     if (m.workflowRule) {
       rules.push({
         patterns: [...m.workflowRule.patterns],
@@ -191,10 +191,30 @@ export function detectCrossDomainFromDependencies(
 ): DynamicCrossDomainPattern | null {
   if (results.length < 2) return null;
 
-  const manifests = getAllManifests();
+  const manifests = getLoadedManifests();
   if (manifests.length === 0) return null;
 
   // Build domain → set of domains it connects to via toolDependencies
+  const { domainEdges } = buildDomainDependencyGraph(manifests, availableToolNames);
+
+  // Collect domains present in top results
+  const resultDomains = new Set<string>();
+  for (const r of results) {
+    if (r.domain) {
+      resultDomains.add(r.domain);
+    }
+  }
+
+  if (resultDomains.size < 2) return null;
+
+  return findConnectedDomainPair(resultDomains, domainEdges, manifests, availableToolNames);
+}
+
+/** Domain→domain edges derived from manifests' declared toolDependencies. */
+function buildDomainDependencyGraph(
+  manifests: ReturnType<typeof getLoadedManifests>,
+  availableToolNames: ReadonlySet<string>,
+): { domainEdges: Map<string, Set<string>> } {
   const domainEdges = new Map<string, Set<string>>();
   const domainTools = new Map<string, Set<string>>();
 
@@ -225,18 +245,16 @@ export function detectCrossDomainFromDependencies(
       }
     }
   }
+  return { domainEdges };
+}
 
-  // Collect domains present in top results
-  const resultDomains = new Set<string>();
-  for (const r of results) {
-    if (r.domain) {
-      resultDomains.add(r.domain);
-    }
-  }
-
-  if (resultDomains.size < 2) return null;
-
-  // Find domain pairs in results that have declared dependency edges
+/** First connected result-domain pair with ≥2 available linked tools. */
+function findConnectedDomainPair(
+  resultDomains: ReadonlySet<string>,
+  domainEdges: ReadonlyMap<string, ReadonlySet<string>>,
+  manifests: ReturnType<typeof getLoadedManifests>,
+  availableToolNames: ReadonlySet<string>,
+): DynamicCrossDomainPattern | null {
   const resultDomainArray = [...resultDomains];
   for (let i = 0; i < resultDomainArray.length; i++) {
     for (let j = i + 1; j < resultDomainArray.length; j++) {
@@ -245,21 +263,7 @@ export function detectCrossDomainFromDependencies(
       const connected = domainEdges.get(d1)?.has(d2) || domainEdges.get(d2)?.has(d1);
       if (!connected) continue;
 
-      // Collect dependency-declared tools from both domains
-      const linkedTools = new Set<string>();
-      for (const m of manifests) {
-        if (!m.toolDependencies) continue;
-        for (const dep of m.toolDependencies) {
-          const fromDomain = getToolDomainForDependency(dep.from, manifests);
-          const toDomain = getToolDomainForDependency(dep.to, manifests);
-          if ((fromDomain === d1 && toDomain === d2) || (fromDomain === d2 && toDomain === d1)) {
-            if (availableToolNames.has(dep.from)) linkedTools.add(dep.from);
-            if (availableToolNames.has(dep.to)) linkedTools.add(dep.to);
-          }
-        }
-      }
-
-      const sequenceTools = [...linkedTools];
+      const sequenceTools = collectLinkedTools(d1, d2, manifests, availableToolNames);
       if (sequenceTools.length < 2) continue;
 
       return {
@@ -275,9 +279,30 @@ export function detectCrossDomainFromDependencies(
   return null;
 }
 
+/** Dependency-declared tools connecting d1/d2 in either direction (available only). */
+function collectLinkedTools(
+  d1: string,
+  d2: string,
+  allManifests: ReturnType<typeof getLoadedManifests>,
+  activeToolNames: ReadonlySet<string>,
+): string[] {
+  const linkedTools = new Set<string>();
+  for (const m of allManifests) {
+    if (!m.toolDependencies) continue;
+    for (const dep of m.toolDependencies) {
+      const fromDomain = getToolDomainForDependency(dep.from, allManifests);
+      const toDomain = getToolDomainForDependency(dep.to, allManifests);
+      if ((fromDomain === d1 && toDomain === d2) || (fromDomain === d2 && toDomain === d1)) {
+        if (activeToolNames.has(dep.from)) linkedTools.add(dep.from);
+        if (activeToolNames.has(dep.to)) linkedTools.add(dep.to);
+      }
+    }
+  }
+  return [...linkedTools];
+}
 function getToolDomainForDependency(
   toolName: string,
-  manifests: ReturnType<typeof getAllManifests>,
+  manifests: ReturnType<typeof getLoadedManifests>,
 ): string | null {
   for (const m of manifests) {
     for (const reg of m.registrations) {
@@ -291,7 +316,7 @@ function getToolDomainForDependency(
 
 function getEffectiveDomainsForDependency(
   dep: { from: string; to: string },
-  manifests: ReturnType<typeof getAllManifests>,
+  manifests: ReturnType<typeof getLoadedManifests>,
 ): string[] {
   return [
     getToolDomainForDependency(dep.from, manifests),

@@ -60,18 +60,6 @@ export interface CryptoExtractResult {
   dependencySnippets: string[];
 }
 
-export const SUPPORTED_TRANSFORM_SET: ReadonlySet<string> = new Set(SUPPORTED_TRANSFORMS);
-
-export const NUMERIC_BINARY_EXPR = /\b(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)\b/g;
-export const STRING_CONCAT_EXPR =
-  /(['"])((?:\\.|(?!\1)[^\\])*)\1\s*\+\s*(['"])((?:\\.|(?!\3)[^\\])*)\3/g;
-export const STRING_LITERAL_EXPR = /(['"])((?:\\.|(?!\1)[^\\])*)\1/g;
-export const DEAD_CODE_IF_FALSE_WITH_ELSE =
-  /if\s*\(\s*(?:false|0|!0\s*===\s*!1)\s*\)\s*\{([\s\S]*?)\}\s*else\s*\{([\s\S]*?)\}/g;
-export const DEAD_CODE_IF_FALSE = /if\s*\(\s*(?:false|0|!0\s*===\s*!1)\s*\)\s*\{[\s\S]*?\}/g;
-
-export const WORKER_TIMEOUT_MS = TRANSFORM_WORKER_TIMEOUT_MS;
-
 export const TransformLimit = {
   MAX_LCS_CELLS: 250000,
 } as const;
@@ -96,7 +84,7 @@ const QUICKJS_MODULE_URL = import.meta.resolve('quickjs-emscripten');
 const QUICKJS_MEMORY_LIMIT_BYTES = TRANSFORM_CRYPTO_POOL_MAX_OLD_GEN_MB * 1024 * 1024;
 // Keep below QuickJS's fixed WebAssembly stack so evaluation cannot overflow it.
 const QUICKJS_STACK_LIMIT_BYTES = 1 * 1024 * 1024;
-const QUICKJS_TIMEOUT_MS = Math.max(1000, WORKER_TIMEOUT_MS - 1000);
+const QUICKJS_TIMEOUT_MS = Math.max(1000, TRANSFORM_WORKER_TIMEOUT_MS - 1000);
 
 /**
  * Pure JavaScript compatibility layer evaluated inside QuickJS.
@@ -768,7 +756,8 @@ export function parseTransforms(raw: unknown): TransformKind[] {
   const unique: TransformKind[] = [];
   const seen = new Set<string>();
   for (const value of values) {
-    if (!SUPPORTED_TRANSFORM_SET.has(value)) throw new Error(`Unsupported transform: ${value}`);
+    if (!SUPPORTED_TRANSFORMS.includes(value as never))
+      throw new Error(`Unsupported transform: ${value}`);
     if (!seen.has(value)) {
       seen.add(value);
       unique.push(value as TransformKind);
@@ -804,17 +793,6 @@ export function requireString(raw: unknown, field: string): string {
   return raw;
 }
 
-export function escapeStringContent(value: string, quote: string): string {
-  const escapedBackslash = value.replace(/\\/g, '\\\\');
-  const escapedControls = escapedBackslash
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n')
-    .replace(/\t/g, '\\t');
-  return quote === '"'
-    ? escapedControls.replace(/"/g, '\\"')
-    : escapedControls.replace(/'/g, "\\'");
-}
-
 export function decodeEscapedString(value: string): string {
   return value
     .replace(/\\x([0-9a-fA-F]{2})/g, (_f, hex: string) => String.fromCharCode(parseInt(hex, 16)))
@@ -831,6 +809,52 @@ export function decodeEscapedString(value: string): string {
     .replace(/\\"/g, '"')
     .replace(/\\'/g, "'")
     .replace(/\\\\/g, '\\');
+}
+
+/**
+ * Page-side script-source resolver, executed via page.evaluate. Must stay
+ * closure-free: Playwright/CDP serializes the function source, so it may only
+ * touch its own parameter and browser globals.
+ */
+async function fetchPageScriptSource(id: string): Promise<string> {
+  // Must live inside the serialized page callback — the browser, not Node,
+  // executes it.
+  // oxlint-disable-next-line unicorn/consistent-function-scoping
+  async function fetchScriptText(src: string): Promise<string> {
+    try {
+      const r = await fetch(src);
+      return r.ok ? await r.text() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  const scripts = Array.from(document.scripts) as HTMLScriptElement[];
+  const byNumericIndex = Number(id);
+  if (Number.isInteger(byNumericIndex) && byNumericIndex >= 0 && byNumericIndex < scripts.length) {
+    const script = scripts[byNumericIndex];
+    if (script) {
+      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
+      if (script.src) {
+        const text = await fetchScriptText(script.src);
+        if (text) return text;
+      }
+    }
+  }
+  for (const script of scripts) {
+    if (script.id === id || script.dataset?.scriptId === id) {
+      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
+      if (script.src) {
+        const text = await fetchScriptText(script.src);
+        if (text) return text;
+      }
+    }
+    if (script.src && script.src.includes(id)) {
+      const text = await fetchScriptText(script.src);
+      if (text) return text;
+    }
+  }
+  return '';
 }
 
 export async function resolveScriptSource(
@@ -858,42 +882,7 @@ export async function resolveScriptSource(
   if (fromCache?.content && fromCache.content.length > 0) return fromCache.content;
 
   const page = await collector.getActivePage();
-  const pageSource = await page.evaluate(async (id: string): Promise<string> => {
-    const scripts = Array.from(document.scripts);
-    const byNumericIndex = Number(id);
-    if (
-      Number.isInteger(byNumericIndex) &&
-      byNumericIndex >= 0 &&
-      byNumericIndex < scripts.length
-    ) {
-      const script = scripts[byNumericIndex] as HTMLScriptElement;
-      if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
-      if (script.src) {
-        try {
-          const r = await fetch(script.src);
-          if (r.ok) return await r.text();
-        } catch {}
-      }
-    }
-    for (const script of scripts as HTMLScriptElement[]) {
-      if (script.id === id || script.dataset?.scriptId === id) {
-        if (script.textContent && script.textContent.trim().length > 0) return script.textContent;
-        if (script.src) {
-          try {
-            const r = await fetch(script.src);
-            if (r.ok) return await r.text();
-          } catch {}
-        }
-      }
-      if (script.src && script.src.includes(id)) {
-        try {
-          const r = await fetch(script.src);
-          if (r.ok) return await r.text();
-        } catch {}
-      }
-    }
-    return '';
-  }, scriptId);
+  const pageSource = await page.evaluate(fetchPageScriptSource, scriptId);
 
   if (typeof pageSource === 'string' && pageSource.length > 0) return pageSource;
   throw new Error(`Unable to resolve source from scriptId: ${scriptId}`);
@@ -919,7 +908,7 @@ export function resolveFunctionName(
   return 'extractedCryptoFn';
 }
 
-export function isValidIdentifier(value: string): boolean {
+function isValidIdentifier(value: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
 }
 
@@ -953,7 +942,7 @@ export async function runCryptoHarness(
   try {
     const msg = await pool.submit(
       { code, functionName, testInputs } as unknown as Record<string, unknown>,
-      WORKER_TIMEOUT_MS,
+      TRANSFORM_WORKER_TIMEOUT_MS,
     );
     if (!msg.ok)
       return {

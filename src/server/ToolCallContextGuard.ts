@@ -14,7 +14,7 @@
 import { logger } from '@utils/logger';
 import { matchesWildcardPattern } from '@utils/matchesWildcardPattern';
 import { getToolRequestContext } from '@server/runtime/ToolRequestContext';
-import { META_TOOL_NAMES } from '@server/MCPServer.search';
+import { META_TOOL_NAMES } from '@server/MCPServer.search.meta-names';
 import { emitBusEvent, type EventBus, type ServerEventMap } from '@server/EventBus';
 import { MCP_DOOM_LOOP_THRESHOLD, TOOL_GATE_MAX_LISTED_RULES } from '@src/constants/server';
 import type { ToolExecutionConfig, ToolExecutionRuleConfig } from '@internal-types/config';

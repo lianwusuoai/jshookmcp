@@ -12,7 +12,7 @@
  *  - deactivateDomainOnExpiry(ctx, domain) - on expiry: remove tools + sendToolListChanged
  */
 import { logger } from '@utils/logger';
-import { getToolDomain } from '@server/ToolCatalog';
+import { getToolDomain } from '@server/registry/views';
 import type { MCPServerContext } from '@server/MCPServer.context';
 import { getRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { deactivateToolCore } from '@server/tool-lifecycle';

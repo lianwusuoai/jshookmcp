@@ -66,6 +66,7 @@ vi.mock('@server/ToolRouter.probe', () => ({
 }));
 
 import { handleCallTool } from '@server/MCPServer.search.handlers.call';
+import { getMetaToolHandler } from '@server/MCPServer.search';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
 function createCtx(overrides: Record<string, unknown> = {}) {
@@ -119,7 +120,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
       // null parses as object but fails !parsed check — should be left unchanged
       // @ts-expect-error
@@ -133,7 +134,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // number is not an object — should be left unchanged
       // @ts-expect-error
       expect(response.content[0].text).toBe('42');
@@ -146,7 +147,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // Non-string text property — item should be returned unchanged
       // @ts-expect-error
       expect(response.content[0].text).toBe(123);
@@ -159,7 +160,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // No text property — item should be returned unchanged
       expect(response.content[0]).toEqual({ type: 'text', data: 'something' });
     });
@@ -171,7 +172,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       expect(response.content).toEqual([]);
     });
 
@@ -182,7 +183,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // @ts-expect-error
       const parsed = JSON.parse(response.content[0].text);
       expect(parsed.foo).toBe('bar');
@@ -198,7 +199,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
         })),
       });
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // @ts-expect-error
       const parsed = JSON.parse(response.content[0].text);
       // SECURITY: Auto-activation was removed. An unknown name must report
@@ -217,7 +218,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
       });
       const ctx = createCtx();
 
-      const response = await handleCallTool(ctx, { name: 'test_tool' });
+      const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
       // Should still succeed despite feedback error
       const parsed = parseResponse(response);
       expect(parsed.result).toBe('ok');
@@ -228,7 +229,11 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('passes valid args object to executeToolWithTracking', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, { name: 'test_tool', args: { param: 'value', count: 5 } });
+      await handleCallTool(
+        ctx,
+        { name: 'test_tool', args: { param: 'value', count: 5 } },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {
         param: 'value',
@@ -239,7 +244,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('treats null args as empty object', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, { name: 'test_tool', args: null });
+      await handleCallTool(ctx, { name: 'test_tool', args: null }, { getMetaToolHandler });
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
     });
@@ -247,7 +252,7 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('treats number args as empty object', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, { name: 'test_tool', args: 42 });
+      await handleCallTool(ctx, { name: 'test_tool', args: 42 }, { getMetaToolHandler });
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
     });
@@ -257,10 +262,14 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('accepts "parameters" as a plain object as the arguments container', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'test_tool',
-        parameters: { url: withPath(TEST_URLS.root, 'get'), method: 'GET' },
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'test_tool',
+          parameters: { url: withPath(TEST_URLS.root, 'get'), method: 'GET' },
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {
         url: withPath(TEST_URLS.root, 'get'),
@@ -271,10 +280,14 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('accepts "parameters" as a JSON stringified object', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'test_tool',
-        parameters: JSON.stringify({ url: withPath(TEST_URLS.root, 'videos'), limit: 1 }),
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'test_tool',
+          parameters: JSON.stringify({ url: withPath(TEST_URLS.root, 'videos'), limit: 1 }),
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {
         url: withPath(TEST_URLS.root, 'videos'),
@@ -285,7 +298,11 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('parameters string that is not valid JSON falls back to empty object', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, { name: 'test_tool', parameters: 'not-json-at-all' });
+      await handleCallTool(
+        ctx,
+        { name: 'test_tool', parameters: 'not-json-at-all' },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
     });
@@ -293,7 +310,11 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('parameters string that is a JSON array falls back to empty object', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, { name: 'test_tool', parameters: '[1, 2, 3]' });
+      await handleCallTool(
+        ctx,
+        { name: 'test_tool', parameters: '[1, 2, 3]' },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
     });
@@ -301,11 +322,15 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('args takes precedence over parameters when both are present', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'test_tool',
-        args: { key: 'from_args' },
-        parameters: { key: 'from_parameters' },
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'test_tool',
+          args: { key: 'from_args' },
+          parameters: { key: 'from_parameters' },
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {
         key: 'from_args',
@@ -315,10 +340,14 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('accepts "arguments" as a JSON stringified wrapper (MCP client standard field)', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'http2_probe',
-        arguments: JSON.stringify({ url: withPath(TEST_URLS.root, 'search'), method: 'GET' }),
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'http2_probe',
+          arguments: JSON.stringify({ url: withPath(TEST_URLS.root, 'search'), method: 'GET' }),
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('http2_probe', {
         url: withPath(TEST_URLS.root, 'search'),
@@ -331,12 +360,16 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('collects top-level keys as tool args when no args/parameters wrapper is present', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'http2_probe',
-        url: withPath(TEST_URLS.root, 'search'),
-        method: 'GET',
-        timeoutMs: 20000,
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'http2_probe',
+          url: withPath(TEST_URLS.root, 'search'),
+          method: 'GET',
+          timeoutMs: 20000,
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('http2_probe', {
         url: withPath(TEST_URLS.root, 'search'),
@@ -348,12 +381,16 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('handles mixed string/number values in spread-flat format', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'tab_workflow',
-        action: 'alias_bind',
-        alias: 'main',
-        index: 0,
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'tab_workflow',
+          action: 'alias_bind',
+          alias: 'main',
+          index: 0,
+        },
+        { getMetaToolHandler },
+      );
 
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('tab_workflow', {
         action: 'alias_bind',
@@ -365,11 +402,15 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('does NOT use spread-flat when parameters wrapper is present (even if malformed JSON)', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'test_tool',
-        url: TEST_URLS.root,
-        parameters: 'not-valid-json',
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'test_tool',
+          url: TEST_URLS.root,
+          parameters: 'not-valid-json',
+        },
+        { getMetaToolHandler },
+      );
 
       // parameters key is present → Format 3 is skipped; malformed string → toolArgs stays {}
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
@@ -378,11 +419,15 @@ describe('MCPServer.search.handlers.call — comprehensive edge cases', () => {
     it('does NOT use spread-flat when args wrapper is present (even if null)', async () => {
       const ctx = createCtx();
 
-      await handleCallTool(ctx, {
-        name: 'test_tool',
-        url: TEST_URLS.root,
-        args: null,
-      });
+      await handleCallTool(
+        ctx,
+        {
+          name: 'test_tool',
+          url: TEST_URLS.root,
+          args: null,
+        },
+        { getMetaToolHandler },
+      );
 
       // args key is present → Format 3 is skipped; null is not an object → toolArgs stays {}
       expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});

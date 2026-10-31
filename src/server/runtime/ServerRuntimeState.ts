@@ -1,6 +1,4 @@
 import type { MCPServerContext } from '@server/MCPServer.context';
-import { allTools } from '@server/ToolCatalog';
-import { logger } from '@utils/logger';
 
 export interface BrowserAttachRuntimeSnapshot {
   endpoint: string | null;
@@ -43,6 +41,39 @@ const EMPTY_BROWSER_ATTACH: BrowserAttachRuntimeSnapshot = {
   rendererPid: null,
   attachedAt: null,
 };
+
+function restoreBrowserAttach(
+  browserAttach: Record<string, unknown> | undefined | null,
+): BrowserAttachRuntimeSnapshot {
+  return browserAttach && typeof browserAttach === 'object'
+    ? {
+        endpoint: typeof browserAttach.endpoint === 'string' ? browserAttach.endpoint : null,
+        selectedIndex:
+          typeof browserAttach.selectedIndex === 'number' &&
+          Number.isInteger(browserAttach.selectedIndex)
+            ? browserAttach.selectedIndex
+            : null,
+        selectedUrl:
+          typeof browserAttach.selectedUrl === 'string' ? browserAttach.selectedUrl : null,
+        selectedTitle:
+          typeof browserAttach.selectedTitle === 'string' ? browserAttach.selectedTitle : null,
+        selectedTargetId:
+          typeof browserAttach.selectedTargetId === 'string'
+            ? browserAttach.selectedTargetId
+            : null,
+        browserPid:
+          typeof browserAttach.browserPid === 'number' && Number.isInteger(browserAttach.browserPid)
+            ? browserAttach.browserPid
+            : null,
+        rendererPid:
+          typeof browserAttach.rendererPid === 'number' &&
+          Number.isInteger(browserAttach.rendererPid)
+            ? browserAttach.rendererPid
+            : null,
+        attachedAt: typeof browserAttach.attachedAt === 'string' ? browserAttach.attachedAt : null,
+      }
+    : { ...EMPTY_BROWSER_ATTACH };
+}
 
 export class ServerRuntimeState {
   private dirty = false;
@@ -102,6 +133,19 @@ export class ServerRuntimeState {
         : [],
     );
 
+    this.restorePendingDomainTtls(snapshot);
+    this.browserAttach = restoreBrowserAttach(
+      snapshot.browserAttach as Record<string, unknown> | undefined | null,
+    );
+    this.restorePendingToolCoverage(snapshot);
+
+    this.revision += 1;
+    this.persistedRevision = this.revision;
+    this.dirty = false;
+  }
+
+  /** TTL map from snapshot — skips malformed entries. */
+  private restorePendingDomainTtls(snapshot: Partial<RuntimeStateSnapshot>): void {
     this.pendingDomainTtls = new Map<string, PersistedDomainTtl>();
     if (snapshot.domainTtls && typeof snapshot.domainTtls === 'object') {
       for (const [domain, rawEntry] of Object.entries(snapshot.domainTtls)) {
@@ -119,40 +163,10 @@ export class ServerRuntimeState {
         this.pendingDomainTtls.set(domain, { ttlMinutes, toolNames });
       }
     }
+  }
 
-    const browserAttach = snapshot.browserAttach;
-    this.browserAttach =
-      browserAttach && typeof browserAttach === 'object'
-        ? {
-            endpoint: typeof browserAttach.endpoint === 'string' ? browserAttach.endpoint : null,
-            selectedIndex:
-              typeof browserAttach.selectedIndex === 'number' &&
-              Number.isInteger(browserAttach.selectedIndex)
-                ? browserAttach.selectedIndex
-                : null,
-            selectedUrl:
-              typeof browserAttach.selectedUrl === 'string' ? browserAttach.selectedUrl : null,
-            selectedTitle:
-              typeof browserAttach.selectedTitle === 'string' ? browserAttach.selectedTitle : null,
-            selectedTargetId:
-              typeof browserAttach.selectedTargetId === 'string'
-                ? browserAttach.selectedTargetId
-                : null,
-            browserPid:
-              typeof browserAttach.browserPid === 'number' &&
-              Number.isInteger(browserAttach.browserPid)
-                ? browserAttach.browserPid
-                : null,
-            rendererPid:
-              typeof browserAttach.rendererPid === 'number' &&
-              Number.isInteger(browserAttach.rendererPid)
-                ? browserAttach.rendererPid
-                : null,
-            attachedAt:
-              typeof browserAttach.attachedAt === 'string' ? browserAttach.attachedAt : null,
-          }
-        : { ...EMPTY_BROWSER_ATTACH };
-
+  /** Tool coverage counts from snapshot — clamps malformed values to defaults. */
+  private restorePendingToolCoverage(snapshot: Partial<RuntimeStateSnapshot>): void {
     this.toolCoverage.clear();
     if (snapshot.toolCoverage && typeof snapshot.toolCoverage === 'object') {
       for (const [name, rawEntry] of Object.entries(snapshot.toolCoverage)) {
@@ -172,10 +186,6 @@ export class ServerRuntimeState {
         });
       }
     }
-
-    this.revision += 1;
-    this.persistedRevision = this.revision;
-    this.dirty = false;
   }
 
   noteDirty(): void {
@@ -242,7 +252,10 @@ export class ServerRuntimeState {
     this.noteDirty();
   }
 
-  getCoverageSummary(ctx: MCPServerContext): {
+  getCoverageSummary(
+    ctx: MCPServerContext,
+    catalogToolNames: Iterable<string>,
+  ): {
     called: Record<string, ToolCoverageEntry>;
     calledCount: number;
     uncataloguedCalls: string[];
@@ -258,7 +271,7 @@ export class ServerRuntimeState {
     );
 
     const knownTools = new Set<string>([
-      ...allTools.map((tool) => tool.name),
+      ...catalogToolNames,
       ...ctx.selectedTools.map((tool) => tool.name),
       ...ctx.activatedToolNames,
       ...ctx.extensionToolsByName.keys(),
@@ -289,33 +302,4 @@ export function getRuntimeState(ctx: MCPServerContext): ServerRuntimeState | nul
     return null;
   }
   return ctx.getDomainInstance<ServerRuntimeState>('serverRuntimeState') ?? null;
-}
-
-export async function restorePendingDomainActivations(ctx: MCPServerContext): Promise<void> {
-  const runtimeState = getRuntimeState(ctx);
-  if (!runtimeState) {
-    return;
-  }
-
-  const pendingDomains = runtimeState.getPendingActivatedDomains();
-  if (pendingDomains.length === 0) {
-    return;
-  }
-
-  for (const domain of pendingDomains) {
-    if (ctx.enabledDomains.has(domain) && ctx.domainTtlEntries.has(domain)) {
-      continue;
-    }
-
-    try {
-      const { handleActivateDomain } = await import('@server/MCPServer.search.handlers.domain');
-      const ttlEntry = runtimeState.getPendingDomainTtl(domain);
-      await handleActivateDomain(ctx, {
-        domain,
-        ...(ttlEntry ? { ttlMinutes: ttlEntry.ttlMinutes } : {}),
-      });
-    } catch (error) {
-      logger.warn(`Failed to restore activated domain "${domain}":`, error);
-    }
-  }
 }

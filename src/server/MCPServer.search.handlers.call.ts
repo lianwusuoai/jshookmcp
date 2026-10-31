@@ -16,6 +16,7 @@ import { asTextResponse, asErrorResponse } from '@server/domains/shared/response
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { ToolResponse } from '@server/types';
 import { normalizeToolName } from '@server/MCPServer.search.validation';
+import { runToolExecutionGate } from '@server/ToolCallContextGuard';
 import { getRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { getToolInputSchema } from '@server/ToolRouter.probe';
 import { loadSearchCatalog } from '@server/registry/SearchCatalog';
@@ -106,9 +107,8 @@ async function dispatchMetaTool(
 
   // Gate the dispatched meta tool under its own name before dispatch — the
   // call_tool proxy path must not bypass the toolExecution rules or the
-  // doom-loop breaker (dynamic import keeps the graph acyclic; see
-  // registerSearchMetaTools for the ToolCallContextGuard cycle).
-  const { runToolExecutionGate } = await import('@server/ToolCallContextGuard');
+  // doom-loop breaker. Static import is safe: ToolCallContextGuard depends
+  // only on the meta-names leaf module, never on this file or the barrel.
   const gateResponse = runToolExecutionGate(ctx, name, toolArgs);
   if (gateResponse) {
     return attachCallToolMetadata(gateResponse, callMetadata);
@@ -440,9 +440,15 @@ async function autoActivateCallTool(
   }
 }
 
+/** Handler resolver injected by the barrel's call_tool registration. */
+interface CallToolDeps {
+  getMetaToolHandler: (handlerName: string) => MetaToolDispatchHandler | undefined;
+}
+
 export async function handleCallTool(
   ctx: MCPServerContext,
   args: Record<string, unknown>,
+  deps: CallToolDeps,
 ): Promise<ToolResponse> {
   const searchCatalog = await loadSearchCatalog();
   const rawName = typeof args.name === 'string' ? args.name : '';
@@ -475,11 +481,12 @@ export async function handleCallTool(
 
   // Meta-tools live in neither the router nor the search catalog — dispatch
   // them straight to their registered handlers before auto-activation logic.
-  // Dynamic import keeps the graph acyclic: search.ts registers handleCallTool
-  // (implemented here), so a static import of META_TOOL_NAMES would cycle.
-  const { META_TOOL_NAMES, getMetaToolHandler } = await import('@server/MCPServer.search');
+  // META_TOOL_NAMES comes from the leaf names module; the handler resolver is
+  // injected by the barrel's call_tool registration (see the handler wrapper
+  // there), so this file never imports the barrel back.
+  const { META_TOOL_NAMES } = await import('@server/MCPServer.search.meta-names');
   if (META_TOOL_NAMES.has(name)) {
-    return dispatchMetaTool(ctx, name, toolArgs, callMetadata, getMetaToolHandler);
+    return dispatchMetaTool(ctx, name, toolArgs, callMetadata, deps.getMetaToolHandler);
   }
 
   // Auto-activate the tool if it's known but not yet registered.

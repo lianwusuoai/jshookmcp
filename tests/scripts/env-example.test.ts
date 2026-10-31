@@ -109,6 +109,8 @@ const allowedRawProcessEnvironment = new Set([
   'src/modules/external/ExternalToolRunner.ts:WINDIR',
   'src/modules/external/WindowsCommand.ts:ComSpec',
   'src/modules/external/WindowsCommand.ts:PATHEXT',
+  'src/native/syscall/InProcessPatcher.ts:SystemRoot',
+  'src/native/syscall/InProcessPatcher.ts:WINDIR',
   'src/modules/process/memory/AuditTrail.ts:USER',
   'src/modules/process/memory/AuditTrail.ts:USERNAME',
   'src/native/syscall/AntiAnalysis.ts:ELECTRON_RUN_AS_NODE',

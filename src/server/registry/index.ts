@@ -1,23 +1,10 @@
-import type { Tool } from '@modelcontextprotocol/server';
-
 /**
  * Central tool registry — single source of truth with lazy domain loading.
  *
  * Startup loads only manifests for the active profile tier.
  * Additional domains are loaded on-demand via ensureDomainLoaded().
  */
-function isSubset(a: string[], b: string[]): boolean {
-  const bSet = new Set(b);
-  return a.every((x) => bSet.has(x));
-}
-
-import type {
-  DomainManifest,
-  ToolHandlerDeps,
-  ToolRegistration,
-  ToolProfileId,
-} from '@server/registry/contracts';
-import type { ToolHandler } from '@server/types';
+import type { DomainManifest, ToolRegistration, ToolProfileId } from '@server/registry/contracts';
 import { registerCompiledValidator } from '@server/registry/compiled-validators';
 import {
   discoverDomainManifests,
@@ -25,33 +12,26 @@ import {
   getDomainsForProfile,
   getAllKnownDomainNames,
 } from '@server/registry/discovery';
-import { DOMAIN_PROFILE_MAP } from '@server/registry/generated-domains.js';
 import { emitBusEvent, type EventBus, type ServerEventMap } from '@server/EventBus';
 import { logger } from '@utils/logger';
 
 // ── Cache invalidation listeners ──
 //
-// ToolCatalog.ts caches views derived from this registry (toolGroups,
-// toolDomainByName, ...) and needs to invalidate them whenever a new domain
-// is loaded on demand. Rather than importing ToolCatalog here (which would
-// create an import cycle, since ToolCatalog imports registry builders),
-// ToolCatalog subscribes its own invalidation callback via
-// onRegistryInvalidate() at module load time.
-const invalidationListeners: Array<() => void> = [];
+// Moved to registry/state.ts together with the manifests/registrations
+// caches, so read-only consumers (ToolRouter.policy, ToolRouter.intent) can
+// import the leaf state module instead of this barrel — the barrel's import
+// graph reaches every domain manifest via discovery.ts → generated-domains.ts.
 
-/** Subscribe a callback to be invoked whenever registry state changes in a way that invalidates derived caches. */
-export function onRegistryInvalidate(listener: () => void): void {
-  invalidationListeners.push(listener);
-}
-
-function notifyInvalidation(): void {
-  for (const listener of invalidationListeners) listener();
-}
+import {
+  getLoadedManifests,
+  isRegistryInitialised,
+  notifyRegistryInvalidation,
+  pushLoadedManifest,
+  setRegistryCaches,
+} from '@server/registry/state';
 
 // ── Lazy-init singleton ──
 
-let manifestsCache: DomainManifest[] | null = null;
-let registrationsCache: ToolRegistration[] | null = null;
 let initPromise: Promise<void> | null = null;
 
 // Cached views — materialized once after init, updated on lazy loads.
@@ -60,7 +40,7 @@ let toolNamesView: ReadonlySet<string> | null = null;
 let registrationsByName: Map<string, ToolRegistration> | null = null;
 
 async function init(profile?: ToolProfileId, eventBus?: EventBus<ServerEventMap>): Promise<void> {
-  if (manifestsCache !== null) return;
+  if (isRegistryInitialised()) return;
   if (initPromise) {
     await initPromise;
     return;
@@ -68,7 +48,6 @@ async function init(profile?: ToolProfileId, eventBus?: EventBus<ServerEventMap>
   initPromise = (async () => {
     const domainsToLoad = profile ? getDomainsForProfile(profile) : undefined;
     const discovered = await discoverDomainManifests(domainsToLoad, eventBus);
-    manifestsCache = discovered;
 
     registrationsByName = new Map();
     for (const m of discovered) {
@@ -86,10 +65,11 @@ async function init(profile?: ToolProfileId, eventBus?: EventBus<ServerEventMap>
         registerCompiledValidator(registration.tool);
       }
     }
-    registrationsCache = [...registrationsByName.values()];
+    const registrations = [...registrationsByName.values()];
+    setRegistryCaches(discovered, registrations);
 
-    domainsView = new Set(manifestsCache.map((m) => m.domain));
-    toolNamesView = new Set(registrationsCache.map((r) => r.tool.name));
+    domainsView = new Set(discovered.map((m) => m.domain));
+    toolNamesView = new Set(registrations.map((r) => r.tool.name));
   })();
   await initPromise;
 }
@@ -114,18 +94,21 @@ export async function ensureDomainLoaded(
   domainName: string,
   eventBus?: EventBus<ServerEventMap>,
 ): Promise<DomainManifest | null> {
-  if (!manifestsCache) throw new Error('[registry] Not initialised - call initRegistry() first.');
+  if (!isRegistryInitialised())
+    throw new Error('[registry] Not initialised - call initRegistry() first.');
+
+  const manifests = getLoadedManifests() as DomainManifest[];
 
   // Already loaded
-  if (manifestsCache.some((m) => m.domain === domainName)) {
-    return manifestsCache.find((m) => m.domain === domainName)!;
+  if (manifests.some((m) => m.domain === domainName)) {
+    return manifests.find((m) => m.domain === domainName)!;
   }
 
   const manifest = await loadSingleManifest(domainName);
   if (!manifest) return null;
 
   // Add to manifests array
-  manifestsCache.push(manifest);
+  pushLoadedManifest(manifest);
   domainsView!.add(manifest.domain);
 
   // Add registrations
@@ -136,11 +119,9 @@ export async function ensureDomainLoaded(
     }
     registerCompiledValidator(registration.tool);
   }
-  registrationsCache = [...registrationsByName!.values()];
-
   // Invalidate the ToolCatalog toolGroups cache so the next getToolsByDomains
   // call picks up the newly registered tools for this domain.
-  notifyInvalidation();
+  notifyRegistryInvalidation();
 
   // Update tool names view
   for (const r of manifest.registrations) {
@@ -162,10 +143,8 @@ export async function ensureDomainLoaded(
  * No-op if all domains are already loaded.
  */
 export async function ensureAllDomainsLoaded(eventBus?: EventBus<ServerEventMap>): Promise<void> {
-  if (!manifestsCache) throw new Error('[registry] Not initialised - call initRegistry() first.');
-
   const allDomains = getAllKnownDomainNames();
-  const loaded = new Set(manifestsCache.map((m) => m.domain));
+  const loaded = new Set(getLoadedManifests().map((m) => m.domain));
   const missing = [...allDomains].filter((d) => !loaded.has(d));
 
   if (missing.length === 0) return;
@@ -176,32 +155,16 @@ export async function ensureAllDomainsLoaded(eventBus?: EventBus<ServerEventMap>
 
 // ── Accessors ──
 
-function getManifests(): DomainManifest[] {
-  if (!manifestsCache) throw new Error('[registry] Not initialised - call initRegistry() first.');
-  return manifestsCache;
-}
-
-function getRegistrations(): ToolRegistration[] {
-  if (!registrationsCache)
-    throw new Error('[registry] Not initialised - call initRegistry() first.');
-  return registrationsCache;
-}
-
 // ── Public read-only views ──
+// Backed by registry/state.ts (leaf module) so router-layer consumers can
+// bypass this barrel entirely.
 
-export function getAllManifests(): readonly DomainManifest[] {
-  return getManifests();
-}
-
-export function getAllRegistrations(): readonly ToolRegistration[] {
-  return getRegistrations();
-}
-
-/** Returns domain names of LOADED manifests only. */
-export function getAllDomains(): ReadonlySet<string> {
-  if (!domainsView) throw new Error('[registry] Not initialised - call initRegistry() first.');
-  return domainsView;
-}
+export {
+  getLoadedManifests as getAllManifests,
+  getLoadedRegistrations as getAllRegistrations,
+  onRegistryInvalidate,
+} from '@server/registry/state';
+export { getLoadedDomainNames as getAllDomains } from '@server/registry/views';
 
 /** Returns ALL known domain names from build-time metadata (no loading needed). */
 export function getAllKnownDomains(): ReadonlySet<string> {
@@ -213,81 +176,16 @@ export function getAllToolNames(): ReadonlySet<string> {
   return toolNamesView;
 }
 
-/** O(1) lookup of a single ToolRegistration by tool name. */
-export function getRegistrationByName(name: string): ToolRegistration | undefined {
-  if (!registrationsByName) {
-    registrationsByName = new Map(getRegistrations().map((r) => [r.tool.name, r]));
-  }
-  return registrationsByName.get(name);
-}
-
-// ── Builders ──
-
-export function buildToolGroups(): Record<string, Tool[]> {
-  const groups: Record<string, Tool[]> = {};
-  for (const r of getRegistrations()) {
-    (groups[r.domain!] ??= []).push(r.tool);
-  }
-  return groups;
-}
-
-export function buildToolDomainMap(): ReadonlyMap<string, string> {
-  const map = new Map<string, string>();
-  for (const r of getRegistrations()) {
-    if (!map.has(r.tool.name)) map.set(r.tool.name, r.domain!);
-  }
-  return map;
-}
-
-export function buildAllTools(): Tool[] {
-  return getRegistrations().map((r) => r.tool);
-}
-
-export function buildHandlerMapFromRegistry(
-  deps: ToolHandlerDeps,
-  selectedToolNames?: ReadonlySet<string>,
-): Record<string, ToolHandler> {
-  const regs = selectedToolNames
-    ? getRegistrations().filter((r) => selectedToolNames.has(r.tool.name))
-    : [...getRegistrations()];
-  const entries: [string, ToolHandler][] = [];
-  for (const r of regs) {
-    try {
-      entries.push([r.tool.name, r.bind(deps) as ToolHandler]);
-    } catch {
-      // Tool's handler is unavailable (missing dependencies) — skip it
-    }
-  }
-  return Object.fromEntries(entries);
-}
-
-export function buildProfileDomains(): Record<ToolProfileId, string[]> {
-  const profiles: Record<string, Set<string>> = {
-    search: new Set(),
-    workflow: new Set(),
-    full: new Set(),
-  };
-
-  // Use build-time metadata as single source of truth — works even when
-  // manifests haven't been loaded yet (search profile starts with 0 loaded).
-  for (const [domain, domainProfiles] of Object.entries(DOMAIN_PROFILE_MAP)) {
-    for (const p of domainProfiles) {
-      profiles[p]?.add(domain);
-    }
-  }
-
-  const result: Record<string, string[]> = {};
-  for (const [p, domains] of Object.entries(profiles)) {
-    result[p] = [...(domains as Set<string>)];
-  }
-
-  // Validate tier hierarchy
-  if (!isSubset(result['search']!, result['workflow']!)) {
-    logger.warn('[registry] Profile hierarchy: search not subset of workflow');
-  }
-  if (!isSubset(result['workflow']!, result['full']!)) {
-    logger.warn('[registry] Profile hierarchy: workflow not subset of full');
-  }
-
-  return result as Record<ToolProfileId, string[]>;
-}
+// ── Builders moved to registry/views.ts (leaf module) so ToolCatalog /
+// ToolHandlerMap can derive caches without importing this barrel — the
+// barrel's import graph reaches every domain manifest via
+// discovery.ts → generated-domains.ts, which re-created the
+// registry↔catalog cycle family.
+export {
+  buildAllTools,
+  buildHandlerMapFromRegistry,
+  buildToolDomainMap,
+  buildToolGroups,
+  getRegistrationByName,
+} from '@server/registry/views';
+export { buildProfileDomains } from '@server/registry/profiles';

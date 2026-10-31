@@ -1,14 +1,17 @@
 import type { Tool } from '@modelcontextprotocol/server';
+// Leaf modules, not the registry barrel: the barrel's import graph reaches
+// every domain manifest via discovery.ts → generated-domains.ts, so importing
+// it from here (16 downstream consumers) re-creates the registry↔catalog
+// cycle family.
 import {
   buildToolGroups,
-  buildToolDomainMap,
-  buildAllTools,
-  buildProfileDomains,
-  getAllDomains,
-  getAllRegistrations,
+  getToolDomain,
+  getLoadedDomainNames as getAllDomains,
+  getLoadedRegistrations as getAllRegistrations,
   getRegistrationByName,
-  onRegistryInvalidate,
-} from '@server/registry/index';
+} from '@server/registry/views';
+import { buildProfileDomains } from '@server/registry/profiles';
+import { onRegistryInvalidate } from '@server/registry/state';
 import type { ToolProfileId } from '@server/registry/contracts';
 
 // Re-export ToolDomain as string for backward compatibility.
@@ -18,9 +21,8 @@ export type ToolProfile = ToolProfileId;
 // Derived from registry — lazily built on first access (after initRegistry).
 // Cleared by ensureDomainLoaded when new domains are added.
 let toolGroups: Record<string, Tool[]> | null = null;
-let toolDomainByName: ReadonlyMap<string, string> | null = null;
+
 let profileDomains: Record<ToolProfile, string[]> | null = null;
-let allToolsCache: Tool[] | null = null;
 
 function getToolGroups(): Record<string, Tool[]> {
   if (!toolGroups) toolGroups = buildToolGroups();
@@ -38,9 +40,7 @@ function getToolGroups(): Record<string, Tool[]> {
  */
 export function clearToolGroupsCache(): void {
   toolGroups = null;
-  toolDomainByName = null;
   profileDomains = null;
-  allToolsCache = null;
 }
 
 // Subscribe to registry-level invalidation (new domain loaded on demand) so
@@ -48,25 +48,12 @@ export function clearToolGroupsCache(): void {
 // module that itself imports from ToolCatalog (that would be a cycle).
 onRegistryInvalidate(clearToolGroupsCache);
 
-function getToolDomainByName(): ReadonlyMap<string, string> {
-  if (!toolDomainByName) toolDomainByName = buildToolDomainMap();
-  return toolDomainByName;
-}
-
 function getProfileDomainsMap(): Record<ToolProfile, string[]> {
   if (!profileDomains) profileDomains = buildProfileDomains();
   return profileDomains;
 }
 
-// Proxy so that consumers can import allTools normally but values resolve lazily.
-export const allTools: Tool[] = new Proxy([] as Tool[], {
-  get(_t, p) {
-    if (!allToolsCache) allToolsCache = buildAllTools();
-    const real = allToolsCache as unknown as Record<string | symbol, unknown>;
-    const v = real[p as string];
-    return typeof v === 'function' ? (v as Function).bind(real) : v;
-  },
-});
+export { allTools } from '@server/registry/views';
 
 /** Tier hierarchy: search ⊂ workflow ⊂ full. */
 export const TIER_ORDER = ['search', 'workflow', 'full'] as const satisfies readonly ToolProfile[];
@@ -121,9 +108,7 @@ export function getToolsForProfile(profile: ToolProfile): Tool[] {
   return dedupeTools(tools);
 }
 
-export function getToolDomain(toolName: string): string | null {
-  return getToolDomainByName().get(toolName) ?? null;
-}
+export { getToolDomain } from '@server/registry/views';
 
 export function getProfileDomains(profile: ToolProfile): string[] {
   return getProfileDomainsMap()[profile] ?? [];
