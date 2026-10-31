@@ -1,4 +1,4 @@
-import { createCodeCollectorMock, parseJson } from '@tests/server/domains/shared/mock-factories';
+import { parseJson } from '@tests/server/domains/shared/mock-factories';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@src/utils/DetailedDataManager', () => ({
@@ -15,10 +15,9 @@ vi.mock('@src/server/domains/shared/modules', () => ({
   CodeCollector: vi.fn(),
 }));
 
-import { AdvancedToolHandlersIntercept } from '@server/domains/network/handlers.impl.core.runtime.intercept';
+import { InterceptHandlers } from '@server/domains/network/handlers/intercept-handlers';
 
-describe('AdvancedToolHandlersIntercept', () => {
-  const collector = createCodeCollectorMock();
+describe('InterceptHandlers (composition)', () => {
   const consoleMonitor = {
     enableFetchIntercept: vi.fn(),
     getFetchInterceptStatus: vi.fn(),
@@ -26,11 +25,13 @@ describe('AdvancedToolHandlersIntercept', () => {
     removeFetchInterceptRule: vi.fn(),
   } as any;
 
-  let handler: AdvancedToolHandlersIntercept;
+  let handler: InterceptHandlers;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    handler = new AdvancedToolHandlersIntercept(collector as any, consoleMonitor);
+    handler = new InterceptHandlers({
+      consoleMonitor: consoleMonitor as never,
+    });
   });
 
   // ---------- handleNetworkInterceptResponse ----------
