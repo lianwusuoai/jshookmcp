@@ -62,50 +62,59 @@ export async function handleNetworkDisable(
   });
 }
 
+/** Shared status-response shape (used by both the composition handlers and the legacy base chain). */
+export function buildNetworkStatusResponse(status: {
+  enabled: boolean;
+  requestCount: number;
+  responseCount: number;
+  listenerCount: number;
+  cdpSessionActive: boolean;
+}): ToolResponse {
+  if (!status.enabled) {
+    return R.fail(' Network monitoring is NOT enabled')
+      .merge({
+        enabled: false,
+        nextSteps: {
+          step1: 'Call network_enable tool to start monitoring',
+          step2: 'Then navigate to a page using page_navigate',
+          step3: 'Finally use network_get_requests to see captured requests',
+        },
+        example: 'network_enable -> page_navigate -> network_get_requests',
+      })
+      .json();
+  }
+
+  return R.ok()
+    .merge({
+      enabled: true,
+      message:
+        ` Network monitoring is active. Captured ${status.requestCount} requests and ` +
+        `${status.responseCount} ` +
+        `responses.`,
+      requestCount: status.requestCount,
+      responseCount: status.responseCount,
+      listenerCount: status.listenerCount,
+      cdpSessionActive: status.cdpSessionActive,
+      nextSteps:
+        status.requestCount === 0
+          ? {
+              hint: 'No requests captured yet',
+              action: 'Navigate to a page using page_navigate to capture network traffic',
+            }
+          : {
+              hint: `${status.requestCount} requests captured`,
+              action: 'Use network_get_requests to retrieve them',
+            },
+    })
+    .json();
+}
+
 export async function handleNetworkGetStatus(
   deps: NetworkHandlerDeps,
   _args: Record<string, unknown>,
 ): Promise<ToolResponse> {
   try {
-    const status = deps.consoleMonitor.getNetworkStatus();
-
-    if (!status.enabled) {
-      return R.fail(' Network monitoring is NOT enabled')
-        .merge({
-          enabled: false,
-          nextSteps: {
-            step1: 'Call network_enable tool to start monitoring',
-            step2: 'Then navigate to a page using page_navigate',
-            step3: 'Finally use network_get_requests to see captured requests',
-          },
-          example: 'network_enable -> page_navigate -> network_get_requests',
-        })
-        .json();
-    }
-
-    return R.ok()
-      .merge({
-        enabled: true,
-        message:
-          ` Network monitoring is active. Captured ${status.requestCount} requests and ` +
-          `${status.responseCount} ` +
-          `responses.`,
-        requestCount: status.requestCount,
-        responseCount: status.responseCount,
-        listenerCount: status.listenerCount,
-        cdpSessionActive: status.cdpSessionActive,
-        nextSteps:
-          status.requestCount === 0
-            ? {
-                hint: 'No requests captured yet',
-                action: 'Navigate to a page using page_navigate to capture network traffic',
-              }
-            : {
-                hint: `${status.requestCount} requests captured`,
-                action: 'Use network_get_requests to retrieve them',
-              },
-      })
-      .json();
+    return buildNetworkStatusResponse(deps.consoleMonitor.getNetworkStatus());
   } catch (error) {
     return R.fail(error).json();
   }

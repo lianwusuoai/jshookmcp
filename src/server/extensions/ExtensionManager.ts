@@ -301,6 +301,71 @@ function buildPluginRecord(
   };
 }
 
+/**
+ * Digest-gate, import, metadata, and integrity-verify one plugin file.
+ * Returns null after pushing a skip-reason into warnings/errors.
+ */
+async function loadVerifiedPlugin(
+  ctx: MCPServerContext,
+  pluginFile: string,
+  allowedDigests: ReadonlySet<string>,
+  coreVersion: string,
+  warnings: string[],
+  errors: string[],
+): Promise<{
+  plugin: ExtensionBuilder;
+  pluginProjectRoot: string;
+  meta: RawExtensionMetadata;
+} | null> {
+  let fileDigest: string;
+  try {
+    fileDigest = normalizeHex(await sha256Hex(pluginFile));
+    if (allowedDigests.size > 0 && !allowedDigests.has(fileDigest)) {
+      warnings.push(`Skip plugin file not in MCP_PLUGIN_ALLOWED_DIGESTS allowlist: ${pluginFile}`);
+      return null;
+    }
+  } catch (error) {
+    errors.push(`Failed to hash plugin file ${pluginFile}: ${String(error)}`);
+    return null;
+  }
+
+  let plugin: ExtensionBuilder;
+  try {
+    const mod: unknown = await import(createFreshImportUrl(pluginFile, 'plugin'));
+    const candidate = (mod as Record<string, unknown>).default ?? mod;
+    if (!isExtensionBuilder(candidate)) {
+      warnings.push(`Skip plugin file without valid ExtensionBuilder: ${pluginFile}`);
+      return null;
+    }
+    plugin = candidate;
+  } catch (error) {
+    errors.push(`Failed to import plugin file ${pluginFile}: ${String(error)}`);
+    return null;
+  }
+
+  const pluginProjectRoot = resolvePluginProjectRoot(pluginFile);
+  const meta = readPluginMetadata(pluginProjectRoot, plugin.id, warnings);
+
+  if (ctx.extensionPluginsById.has(plugin.id)) {
+    warnings.push(`Skip plugin "${plugin.id}" from ${pluginFile}: duplicate plugin id`);
+    return null;
+  }
+
+  try {
+    const verification = await verifyPluginIntegrity(plugin, coreVersion);
+    warnings.push(...verification.warnings);
+    if (!verification.ok) {
+      errors.push(...verification.errors);
+      return null;
+    }
+  } catch (error) {
+    errors.push(`Failed to verify plugin ${plugin.id}: ${String(error)}`);
+    return null;
+  }
+
+  return { plugin, pluginProjectRoot, meta };
+}
+
 async function loadPluginWorkflowContributions(
   ctx: MCPServerContext,
   pluginRoots: string[],
@@ -325,53 +390,18 @@ async function loadPluginWorkflowContributions(
   const coreVersion = ctx.config?.mcp?.version ?? '0.0.0';
 
   for (const pluginFile of pluginFiles) {
-    let fileDigest: string;
-    try {
-      fileDigest = normalizeHex(await sha256Hex(pluginFile));
-      if (allowedDigests.size > 0 && !allowedDigests.has(fileDigest)) {
-        warnings.push(
-          `Skip plugin file not in MCP_PLUGIN_ALLOWED_DIGESTS allowlist: ${pluginFile}`,
-        );
-        continue;
-      }
-    } catch (error) {
-      errors.push(`Failed to hash plugin file ${pluginFile}: ${String(error)}`);
+    const verified = await loadVerifiedPlugin(
+      ctx,
+      pluginFile,
+      allowedDigests,
+      coreVersion,
+      warnings,
+      errors,
+    );
+    if (!verified) {
       continue;
     }
-
-    let plugin: ExtensionBuilder;
-    try {
-      const mod: unknown = await import(createFreshImportUrl(pluginFile, 'plugin'));
-      const candidate = (mod as Record<string, unknown>).default ?? mod;
-      if (!isExtensionBuilder(candidate)) {
-        warnings.push(`Skip plugin file without valid ExtensionBuilder: ${pluginFile}`);
-        continue;
-      }
-      plugin = candidate;
-    } catch (error) {
-      errors.push(`Failed to import plugin file ${pluginFile}: ${String(error)}`);
-      continue;
-    }
-
-    const pluginProjectRoot = resolvePluginProjectRoot(pluginFile);
-    const meta = readPluginMetadata(pluginProjectRoot, plugin.id, warnings);
-
-    if (ctx.extensionPluginsById.has(plugin.id)) {
-      warnings.push(`Skip plugin "${plugin.id}" from ${pluginFile}: duplicate plugin id`);
-      continue;
-    }
-
-    try {
-      const verification = await verifyPluginIntegrity(plugin, coreVersion);
-      warnings.push(...verification.warnings);
-      if (!verification.ok) {
-        errors.push(...verification.errors);
-        continue;
-      }
-    } catch (error) {
-      errors.push(`Failed to verify plugin ${plugin.id}: ${String(error)}`);
-      continue;
-    }
+    const { plugin, meta } = verified;
 
     const loadedWorkflows: string[] = [];
     const pluginWorkflows = Array.isArray(plugin.workflows) ? plugin.workflows : [];
@@ -436,54 +466,18 @@ async function reloadExtensionsInner(ctx: MCPServerContext): Promise<ExtensionRe
   const coreVersion = ctx.config?.mcp?.version ?? '0.0.0';
 
   for (const pluginFile of pluginFiles) {
-    // ── Pre-import trust gate: verify file digest against allowlist ──
-    let fileDigest: string;
-    try {
-      fileDigest = normalizeHex(await sha256Hex(pluginFile));
-      if (allowedDigests.size > 0 && !allowedDigests.has(fileDigest)) {
-        warnings.push(
-          `Skip plugin file not in MCP_PLUGIN_ALLOWED_DIGESTS allowlist: ${pluginFile}`,
-        );
-        continue;
-      }
-    } catch (error) {
-      errors.push(`Failed to hash plugin file ${pluginFile}: ${String(error)}`);
+    const verified = await loadVerifiedPlugin(
+      ctx,
+      pluginFile,
+      allowedDigests,
+      coreVersion,
+      warnings,
+      errors,
+    );
+    if (!verified) {
       continue;
     }
-
-    let plugin: ExtensionBuilder;
-    try {
-      const mod: unknown = await import(createFreshImportUrl(pluginFile, 'plugin'));
-      const candidate = (mod as Record<string, unknown>).default ?? mod;
-      if (!isExtensionBuilder(candidate)) {
-        warnings.push(`Skip plugin file without valid ExtensionBuilder: ${pluginFile}`);
-        continue;
-      }
-      plugin = candidate;
-    } catch (error) {
-      errors.push(`Failed to import plugin file ${pluginFile}: ${String(error)}`);
-      continue;
-    }
-
-    // ── Inject metadata from adjacent meta.yaml (single source of truth) ──
-    const pluginProjectRoot = resolvePluginProjectRoot(pluginFile);
-    const meta = readPluginMetadata(pluginProjectRoot, plugin.id, warnings);
-
-    if (ctx.extensionPluginsById.has(plugin.id)) {
-      warnings.push(`Skip plugin "${plugin.id}" from ${pluginFile}: duplicate plugin id`);
-      continue;
-    }
-    try {
-      const verification = await verifyPluginIntegrity(plugin, coreVersion);
-      warnings.push(...verification.warnings);
-      if (!verification.ok) {
-        errors.push(...verification.errors);
-        continue;
-      }
-    } catch (error) {
-      errors.push(`Failed to verify plugin ${plugin.id}: ${String(error)}`);
-      continue;
-    }
+    const { plugin, pluginProjectRoot, meta } = verified;
 
     const runtimeData = new Map<string, unknown>();
     const metrics = new Set<string>();

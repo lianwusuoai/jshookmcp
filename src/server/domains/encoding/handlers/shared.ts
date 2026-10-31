@@ -716,7 +716,7 @@ export function calculateSerialCorrelation(buffer: Buffer): number {
   return Number((numerator / denominator).toFixed(6));
 }
 
-function printableRatio(buffer: Buffer): number {
+export function printableRatio(buffer: Buffer): number {
   if (buffer.length === 0) return 1;
   let printable = 0;
   for (const value of buffer.values()) {
@@ -724,4 +724,20 @@ function printableRatio(buffer: Buffer): number {
       printable += 1;
   }
   return printable / buffer.length;
+}
+
+/** True when >=90% of chars are printable ASCII/whitespace (exact port of the former EncodingHandlersBase helper). */
+export function isMostlyPrintableText(text: string): boolean {
+  if (text.length === 0) {
+    return true;
+  }
+
+  let printable = 0;
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if ((code >= 0x20 && code <= 0x7e) || code === 0x09 || code === 0x0a || code === 0x0d) {
+      printable++;
+    }
+  }
+  return printable / text.length >= 0.85;
 }

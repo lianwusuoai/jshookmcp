@@ -227,7 +227,7 @@ import {
   neonZip,
   packLanes as neonPackLanes,
 } from './simd-neon';
-import { signExtend9, signExtend7, signExtend19 } from './simd-utils';
+import { signExtend9, signExtend7, signExtend19, transferInterleavedStructs } from './simd-utils';
 
 /**
  * The narrow capability window CpuEngine grants the SIMD layer. Structural
@@ -371,51 +371,6 @@ function execMultiStructLoadStore(ctx: SimdContext, insn: number): boolean {
     ctx.gprWrite(rn, BigInt(base + increment));
   }
   return true;
-}
-
-function transferInterleavedStructs(
-  ctx: SimdContext,
-  options: {
-    isLoad: boolean;
-    base: number;
-    rt: number;
-    structCount: number;
-    regBytes: number;
-    elementBytes: number;
-  },
-): void {
-  const { isLoad, base, rt, structCount, regBytes, elementBytes } = options;
-  const lanes = regBytes / elementBytes;
-  if (!Number.isInteger(lanes) || lanes <= 0) return;
-
-  if (isLoad) {
-    const data = ctx.memRead(base, structCount * regBytes);
-    const regs = Array.from({ length: structCount }, () => new Uint8Array(16));
-    for (let lane = 0; lane < lanes; lane++) {
-      for (let member = 0; member < structCount; member++) {
-        const src = (lane * structCount + member) * elementBytes;
-        const dst = lane * elementBytes;
-        regs[member]!.set(data.subarray(src, src + elementBytes), dst);
-      }
-    }
-    for (let member = 0; member < structCount; member++) {
-      ctx.vSetBytes((rt + member) % 32, regs[member]!);
-    }
-    return;
-  }
-
-  const out = new Uint8Array(structCount * regBytes);
-  const regs = Array.from({ length: structCount }, (_, member) =>
-    ctx.vGetBytes((rt + member) % 32),
-  );
-  for (let lane = 0; lane < lanes; lane++) {
-    for (let member = 0; member < structCount; member++) {
-      const src = lane * elementBytes;
-      const dst = (lane * structCount + member) * elementBytes;
-      out.set(regs[member]!.subarray(src, src + elementBytes), dst);
-    }
-  }
-  ctx.memWrite(base, out);
 }
 
 /** Move `bytes` bytes between V[reg] (low end) and a guest address. */

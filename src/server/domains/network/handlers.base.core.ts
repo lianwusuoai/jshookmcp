@@ -11,6 +11,7 @@ import type { ConsoleMonitor } from '@server/domains/shared/modules/collector';
 import type { TraceRecorder } from '@modules/trace/TraceRecorder';
 import { argBool, argNumber } from '@server/domains/shared/parse-args';
 import { PerformanceMonitor } from '@server/domains/shared/modules';
+import { buildNetworkStatusResponse } from './handlers/core-handlers.status';
 import type { EventBus, ServerEventMap } from '@server/EventBus';
 import {
   EXCLUDED_RESOURCE_TYPES,
@@ -219,50 +220,11 @@ export class NetworkHandlersCore {
 
   async handleNetworkGetStatus(_args: Record<string, unknown>): Promise<ToolResponse> {
     try {
-      const status = this.consoleMonitor.getNetworkStatus();
-
-      if (!status.enabled) {
-        return R.fail(' Network monitoring is NOT enabled')
-          .merge({
-            enabled: false,
-            nextSteps: {
-              step1: 'Call network_enable tool to start monitoring',
-              step2: 'Then navigate to a page using page_navigate',
-              step3: 'Finally use network_get_requests to see captured requests',
-            },
-            example: 'network_enable -> page_navigate -> network_get_requests',
-          })
-          .json();
-      }
-
-      return R.ok()
-        .merge({
-          enabled: true,
-          message:
-            ` Network monitoring is active. Captured ${status.requestCount} requests and ` +
-            `${status.responseCount} ` +
-            `responses.`,
-          requestCount: status.requestCount,
-          responseCount: status.responseCount,
-          listenerCount: status.listenerCount,
-          cdpSessionActive: status.cdpSessionActive,
-          nextSteps:
-            status.requestCount === 0
-              ? {
-                  hint: 'No requests captured yet',
-                  action: 'Navigate to a page using page_navigate to capture network traffic',
-                }
-              : {
-                  hint: `${status.requestCount} requests captured`,
-                  action: 'Use network_get_requests to retrieve them',
-                },
-        })
-        .json();
+      return buildNetworkStatusResponse(this.consoleMonitor.getNetworkStatus());
     } catch (error) {
       return R.fail(error).json();
     }
   }
-
   // ── Network requests ──
 
   async handleNetworkGetRequests(args: Record<string, unknown>): Promise<ToolResponse> {
