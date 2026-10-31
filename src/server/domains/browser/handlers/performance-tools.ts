@@ -29,7 +29,7 @@ import {
   buildHotFunctions,
   type CpuProfilePayload,
   toCpuProfilePayload,
-} from '@server/domains/network/handlers.base.types';
+} from '@server/domains/network/handlers/network-types';
 import type { CodeCollector } from '@server/domains/shared/modules/collector';
 import type { ToolResponse } from '@server/types';
 

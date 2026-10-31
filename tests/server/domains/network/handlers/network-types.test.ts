@@ -4,9 +4,9 @@ import {
   isNetworkRequestPayload,
   isNetworkResponsePayload,
   isCpuProfileNodePayload,
-} from '@server/domains/network/handlers.base.types';
+} from '@server/domains/network/handlers/network-types';
 
-describe('network handlers.base.types type guards', () => {
+describe('network network-types type guards', () => {
   it('isNetworkResponsePayload accepts a finite numeric status', () => {
     expect(isNetworkResponsePayload({ status: 200, body: 'ok' })).toBe(true);
   });

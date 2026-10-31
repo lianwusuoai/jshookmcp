@@ -23,19 +23,8 @@ const mocks = vi.hoisted(() => {
 
   const collectorMock = {};
 
-  const loggerMock = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  };
-
-  return { consoleMonitorMock, performanceMonitorMock, collectorMock, loggerMock };
+  return { consoleMonitorMock, performanceMonitorMock, collectorMock };
 });
-
-vi.mock('@utils/logger', () => ({
-  logger: mocks.loggerMock,
-}));
 
 vi.mock('@server/domains/shared/modules', () => ({
   PerformanceMonitor: vi.fn(),
@@ -47,14 +36,14 @@ vi.mock('@utils/DetailedDataManager', () => ({
   },
 }));
 
-import { AdvancedHandlersBase } from '@server/domains/network/handlers.base';
+import { ConsoleHandlers } from '@server/domains/network/handlers/console-handlers';
+import { AdvancedToolHandlers } from '@server/domains/network/handlers.impl';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-type HandlerArgs = ConstructorParameters<typeof AdvancedHandlersBase>;
 type TextToolResponse = {
   content: Array<{ type: string; text?: string; [key: string]: any }>;
 };
@@ -65,21 +54,12 @@ type ConsoleExceptionsPayload = {
   total: number;
 };
 
-class TestAdvancedHandlersBase extends AdvancedHandlersBase {
-  setPerformanceMonitorForTest(monitor: PerformanceMonitor | null): void {
-    this.performanceMonitor = monitor;
-  }
-
-  getPerformanceMonitorForTest(): PerformanceMonitor | null {
-    return this.performanceMonitor;
-  }
-}
-
-function createHandler(): TestAdvancedHandlersBase {
-  return new TestAdvancedHandlersBase(
-    mocks.collectorMock as unknown as HandlerArgs[0],
-    mocks.consoleMonitorMock as unknown as HandlerArgs[1],
-  );
+function createHandler(): ConsoleHandlers {
+  return new ConsoleHandlers({
+    consoleMonitor: mocks.consoleMonitorMock as unknown as ConstructorParameters<
+      typeof ConsoleHandlers
+    >[0]['consoleMonitor'],
+  });
 }
 
 function getTextContent(result: TextToolResponse): string {
@@ -95,8 +75,8 @@ function parseContent<T = Record<string, unknown>>(result: TextToolResponse): T 
   return JSON.parse(getTextContent(result)) as T;
 }
 
-describe('AdvancedHandlersBase (console)', () => {
-  let handler: TestAdvancedHandlersBase;
+describe('ConsoleHandlers (composition, ex-runtime-console)', () => {
+  let handler: ConsoleHandlers;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -432,32 +412,46 @@ describe('AdvancedHandlersBase (console)', () => {
   });
 
   // -----------------------------------------------------------------------
-  // cleanup
+  // AdvancedToolHandlers.close() — lifecycle (ex legacy cleanup tests)
   // -----------------------------------------------------------------------
-  describe('cleanup', () => {
+  describe('AdvancedToolHandlers.close (lifecycle)', () => {
+    class TestHandlers extends AdvancedToolHandlers {
+      setPerformanceMonitorForTest(monitor: PerformanceMonitor | null): void {
+        this.performanceMonitor = monitor;
+      }
+
+      getPerformanceMonitorForTest(): PerformanceMonitor | null {
+        return this.performanceMonitor;
+      }
+    }
+
+    function createFacade(): TestHandlers {
+      return new TestHandlers(mocks.collectorMock as never, mocks.consoleMonitorMock as never);
+    }
+
+    let facade: TestHandlers;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      facade = createFacade();
+    });
+
     it('closes performanceMonitor when it exists and nullifies it', async () => {
-      // Simulate an initialized performanceMonitor by accessing the protected property
-      handler.setPerformanceMonitorForTest(
+      facade.setPerformanceMonitorForTest(
         mocks.performanceMonitorMock as unknown as PerformanceMonitor,
       );
       mocks.performanceMonitorMock.close.mockResolvedValue(undefined);
 
-      await handler.cleanup();
+      await facade.close();
 
       expect(mocks.performanceMonitorMock.close).toHaveBeenCalledOnce();
-      expect(handler.getPerformanceMonitorForTest()).toBeNull();
-    });
-
-    it('logs cleanup message', async () => {
-      await handler.cleanup();
-
-      expect(mocks.loggerMock.info).toHaveBeenCalledWith('AdvancedHandlersBase cleaned up');
+      expect(facade.getPerformanceMonitorForTest()).toBeNull();
     });
 
     it('does not throw when performanceMonitor is null', async () => {
-      handler.setPerformanceMonitorForTest(null);
+      facade.setPerformanceMonitorForTest(null);
 
-      await expect(handler.cleanup()).resolves.not.toThrow();
+      await expect(facade.close()).resolves.not.toThrow();
       expect(mocks.performanceMonitorMock.close).not.toHaveBeenCalled();
     });
   });

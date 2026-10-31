@@ -4,7 +4,7 @@
  * Extracted from AdvancedHandlersBase (handlers.base.ts).
  */
 
-import { asOptionalString } from '../handlers.base.types';
+import { asOptionalString } from './network-types';
 import { argBool } from '@server/domains/shared/parse-args';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';

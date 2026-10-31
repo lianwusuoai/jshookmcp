@@ -35,20 +35,23 @@ vi.mock('@src/server/domains/shared/modules', () => ({
 }));
 
 import { NETWORK_SMART_HANDLE_THRESHOLD_BYTES } from '@src/constants';
-import { AdvancedHandlersBase } from '@server/domains/network/handlers.base';
+import { CoreHandlers } from '@server/domains/network/handlers/core-handlers';
 import { ToolError } from '@errors/ToolError';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
-describe('AdvancedHandlersBase (requests)', () => {
+describe('CoreHandlers (composition, ex-runtime-requests)', () => {
   let collector: CodeCollectorMirror;
   let consoleMonitor: ConsoleMonitorMirror;
-  let handler: AdvancedHandlersBase;
+  let handler: CoreHandlers;
 
   beforeEach(() => {
     vi.clearAllMocks();
     collector = createCodeCollectorMock();
     consoleMonitor = createConsoleMonitorMock();
-    handler = new AdvancedHandlersBase(collector as any, consoleMonitor as any);
+    handler = new CoreHandlers({
+      collector: collector as any,
+      consoleMonitor: consoleMonitor as any,
+    });
   });
 
   // ---------- handleNetworkGetRequests ----------
@@ -433,7 +436,7 @@ describe('AdvancedHandlersBase (requests)', () => {
         await handler.handleNetworkGetRequests({ urlRegex: '[invalid' }),
       );
       expect(body.success).toBe(false);
-      expect(body.error).toContain('Invalid urlRegex');
+      expect(body.error).toContain('Invalid regular expression');
     });
 
     it('returns error for urlRegex exceeding 500 characters', async () => {
@@ -825,7 +828,7 @@ describe('AdvancedHandlersBase (requests)', () => {
       consoleMonitor.isNetworkEnabled.mockReturnValue(false);
       const body = parseJson<NetworkStatsResponse>(await handler.handleNetworkGetStats({}));
       expect(body.success).toBe(false);
-      expect(body.hint).toContain('network_enable');
+      expect(body.error).toContain('network_enable');
     });
 
     it('computes method and status distribution stats', async () => {

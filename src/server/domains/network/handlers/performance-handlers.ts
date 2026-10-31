@@ -15,7 +15,7 @@ import {
   asOptionalStringArray,
   buildHotFunctions,
   toCpuProfilePayload,
-} from '../handlers.base.types';
+} from './network-types';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 

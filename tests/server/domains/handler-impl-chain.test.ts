@@ -142,9 +142,6 @@ vi.mock('@server/domains/encoding/handlers.impl.core.runtime', () => ({
 vi.mock('@server/domains/graphql/handlers.impl', () => ({
   GraphQLToolHandlers: vi.fn().mockImplementation(() => ({})),
 }));
-vi.mock('@server/domains/network/handlers.impl.core.runtime.intercept', () => ({
-  AdvancedToolHandlersIntercept: vi.fn().mockImplementation(() => ({})),
-}));
 vi.mock('@server/domains/process/handlers.impl', () => ({
   ProcessToolHandlers: vi.fn().mockImplementation(() => ({})),
 }));

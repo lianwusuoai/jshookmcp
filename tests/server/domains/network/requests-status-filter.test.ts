@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyRequestFilters } from '@server/domains/network/handlers/core-handlers.requests';
-import type { NetworkRequestPayload } from '@server/domains/network/handlers.base.types';
+import type { NetworkRequestPayload } from '@server/domains/network/handlers/network-types';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
 function makeRequest(id: string, status: number | undefined): NetworkRequestPayload {
