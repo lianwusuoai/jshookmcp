@@ -28,7 +28,7 @@ const preflightMocks = vi.hoisted(() => ({
   getEffectivePrerequisites: vi.fn(),
 }));
 
-vi.mock('@server/ToolRouter.policy', () => ({
+vi.mock('@server/ToolRouter.prerequisites', () => ({
   getEffectivePrerequisites: preflightMocks.getEffectivePrerequisites,
 }));
 

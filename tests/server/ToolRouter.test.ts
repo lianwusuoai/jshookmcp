@@ -112,6 +112,10 @@ vi.mock('@utils/logger', () => ({
   logger: mocks.logger,
 }));
 
+vi.mock('@server/registry/views', () => ({
+  allTools: mocks.builtinTools,
+  getToolDomain: (name: string) => mocks.domainMap.get(name) ?? null,
+}));
 vi.mock('@server/ToolCatalog', () => ({
   allTools: mocks.builtinTools,
   getToolDomain: (name: string) => mocks.domainMap.get(name) ?? null,

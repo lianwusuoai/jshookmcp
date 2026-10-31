@@ -4,7 +4,7 @@
 
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { WorkflowRouteMetadata } from '@server/workflows/WorkflowContract';
-import { getAllManifests } from '@server/registry/index';
+import { getLoadedManifests } from '@server/registry/state';
 
 // ── Workflow Detection Types ──
 
@@ -56,7 +56,7 @@ const INTENT_CACHE_MAX = 64;
 export function getEffectiveWorkflowRules(): WorkflowRule[] {
   if (cachedWorkflowRules) return cachedWorkflowRules;
   const rules: WorkflowRule[] = [];
-  for (const m of getAllManifests()) {
+  for (const m of getLoadedManifests()) {
     if (m.workflowRule) {
       rules.push({
         patterns: [...m.workflowRule.patterns],
@@ -191,7 +191,7 @@ export function detectCrossDomainFromDependencies(
 ): DynamicCrossDomainPattern | null {
   if (results.length < 2) return null;
 
-  const manifests = getAllManifests();
+  const manifests = getLoadedManifests();
   if (manifests.length === 0) return null;
 
   // Build domain → set of domains it connects to via toolDependencies
@@ -277,7 +277,7 @@ export function detectCrossDomainFromDependencies(
 
 function getToolDomainForDependency(
   toolName: string,
-  manifests: ReturnType<typeof getAllManifests>,
+  manifests: ReturnType<typeof getLoadedManifests>,
 ): string | null {
   for (const m of manifests) {
     for (const reg of m.registrations) {
@@ -291,7 +291,7 @@ function getToolDomainForDependency(
 
 function getEffectiveDomainsForDependency(
   dep: { from: string; to: string },
-  manifests: ReturnType<typeof getAllManifests>,
+  manifests: ReturnType<typeof getLoadedManifests>,
 ): string[] {
   return [
     getToolDomainForDependency(dep.from, manifests),

@@ -12,6 +12,9 @@ vi.mock('@src/utils/logger', () => ({
 }));
 
 // Mock ToolCatalog to avoid importing the full catalog
+vi.mock('@src/server/registry/views', () => ({
+  allTools: [{ name: 'builtin_tool_a' }, { name: 'builtin_tool_b' }],
+}));
 vi.mock('@src/server/ToolCatalog', () => ({
   allTools: [{ name: 'builtin_tool_a' }, { name: 'builtin_tool_b' }],
   getTierIndex: vi.fn((tier: string) => {

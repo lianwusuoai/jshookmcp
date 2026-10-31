@@ -21,7 +21,7 @@ import type {
   ToolResponse,
 } from '@server/plugins/PluginContract';
 import type { WorkflowContract } from '@server/workflows/WorkflowContract';
-import { allTools } from '@server/ToolCatalog';
+import { allTools } from '@server/registry/views';
 import { logger } from '@utils/logger';
 import { readEnvNullableString } from '@src/config/environment';
 import { INSTALLED_EXTENSION_METADATA_FILENAME } from '@server/extensions/types';

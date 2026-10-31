@@ -3,7 +3,8 @@
  * Re-exports the registry-based builder for backward compatibility.
  */
 import type { ToolHandler } from '@server/types';
-import { buildHandlerMapFromRegistry, getAllToolNames } from '@server/registry/index';
+import { buildHandlerMapFromRegistry } from '@server/registry/views';
+import { getAllToolNames } from '@server/registry/index';
 import type { ToolHandlerDeps } from '@server/registry/contracts';
 
 // Backward-compatible alias

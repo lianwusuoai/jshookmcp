@@ -60,6 +60,10 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('@utils/logger', () => ({ logger: mocks.logger }));
+vi.mock('@server/registry/views', () => ({
+  allTools: mocks.builtinTools,
+  getToolDomain: (name: string) => mocks.domainMap.get(name) ?? null,
+}));
 vi.mock('@server/ToolCatalog', () => ({
   allTools: mocks.builtinTools,
   getToolDomain: (name: string) => mocks.domainMap.get(name) ?? null,
@@ -118,6 +122,10 @@ async function importFreshIntentModule(manifests: Array<Record<string, unknown>>
   vi.doMock('@server/registry/index', () => ({
     getAllManifests: () => manifests,
   }));
+  // intent reads manifests via the state leaf module now (cycle break)
+  vi.doMock('@server/registry/state', () => ({
+    getLoadedManifests: () => manifests,
+  }));
   return import('@server/ToolRouter.intent');
 }
 
@@ -128,6 +136,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.doUnmock('@server/registry/index');
+  vi.doUnmock('@server/registry/state');
 });
 
 describe('ToolRouter coverage additions', () => {

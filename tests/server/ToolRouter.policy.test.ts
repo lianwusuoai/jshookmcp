@@ -50,6 +50,51 @@ vi.mock('@server/registry/index', () => ({
   onRegistryInvalidate: vi.fn(),
 }));
 
+vi.mock('@server/registry/state', () => ({
+  getLoadedManifests: vi.fn(() => [
+    {
+      kind: 'domain-manifest',
+      version: 1,
+      domain: 'test-domain',
+      depKey: 'testHandlers',
+      profiles: ['workflow', 'full'],
+      registrations: [],
+      ensure: () => ({}),
+      prerequisites: {
+        test_browser_tool: [
+          { condition: 'Browser must be launched', fix: 'Call browser_launch first' },
+        ],
+        test_network_tool: [
+          { condition: 'Network monitoring must be enabled', fix: 'Call network_enable' },
+        ],
+        test_debugger_tool: [
+          {
+            condition: 'Debugger must be enabled',
+            fix: "Call debugger_lifecycle({ action: 'enable' })",
+          },
+        ],
+        test_debugger_attach_tool: [
+          {
+            condition: 'Debugger must be attached',
+            fix: "Call debugger_lifecycle({ action: 'enable' })",
+          },
+        ],
+        test_page_tool: [{ condition: 'Page must be navigated', fix: 'Call page_navigate' }],
+        test_ws_tool: [
+          {
+            condition: 'WebSocket monitoring must be active',
+            fix: 'Call ws_monitor with action="enable"',
+          },
+        ],
+        test_unknown_tool: [{ condition: 'Some future condition', fix: 'Unknown' }],
+      },
+    },
+  ]),
+  onRegistryInvalidate: vi.fn(),
+}));
+
+vi.mock('@server/registry/views', () => ({}));
+
 describe('buildPrerequisiteCheck', () => {
   beforeEach(() => {
     // Force cache reset by clearing module state

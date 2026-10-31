@@ -3,7 +3,7 @@
  */
 import type { Tool } from '@modelcontextprotocol/server';
 import type { MCPServerContext } from '@server/MCPServer.context';
-import { allTools, getToolDomain } from '@server/ToolCatalog';
+import { allTools, getToolDomain } from '@server/registry/views';
 import { normalizeToolName } from '@server/MCPServer.search.validation';
 import { getLoadedSearchCatalog } from '@server/registry/SearchCatalog';
 

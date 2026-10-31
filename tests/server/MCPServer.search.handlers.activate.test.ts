@@ -76,6 +76,23 @@ vi.mock('@utils/logger', () => ({
   logger: state.logger,
 }));
 
+vi.mock('@server/registry/views', () => ({
+  getToolDomain: (name: string) => {
+    if (name === 'page_navigate' || name === 'browser_launch') return 'browser';
+    if (name === 'network_get_requests') return 'network';
+    return null;
+  },
+  allTools: [
+    tool('browser_launch', 'Launch browser'),
+    tool('page_navigate', 'Navigate page'),
+    tool('network_get_requests', 'Get requests'),
+  ],
+  getRegistrationByName: state.getRegistrationByName,
+  buildToolGroups: vi.fn(() => ({})),
+  buildToolDomainMap: vi.fn(() => new Map()),
+  buildAllTools: vi.fn(() => []),
+}));
+
 vi.mock('@server/registry/index', () => ({
   ensureAllDomainsLoaded: vi.fn().mockResolvedValue(undefined),
   ensureDomainLoaded: state.ensureDomainLoaded,

@@ -1,4 +1,4 @@
-import { getToolDomain } from '@server/ToolCatalog';
+import { getToolDomain } from '@server/registry/views';
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { ToolProfileId } from '@server/registry/contracts';
 import type { ExtensionToolRecord } from '@server/extensions/types';

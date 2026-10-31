@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   onRegistryInvalidate: vi.fn(),
 }));
 
-vi.mock('@server/registry/index', () => ({
+vi.mock('@server/registry/views', () => ({
   buildToolGroups: mocks.buildToolGroups,
   buildToolDomainMap: mocks.buildToolDomainMap,
   buildAllTools: mocks.buildAllTools,
