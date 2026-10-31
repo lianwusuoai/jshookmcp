@@ -11,8 +11,22 @@
  * and is injected via `buildDr7Entries`.
  */
 import { randomUUID } from 'node:crypto';
+import { BREAKPOINT_HIT_TIMEOUT_MS } from '@src/constants';
 import type { BreakpointAccess, BreakpointHit, BreakpointSize } from './HardwareBreakpoint.types';
-import { encodeDR7 } from './Win32Debug';
+import {
+  encodeDR7,
+  EnumerateProcessThreads,
+  openThreadForDebug,
+  SuspendThread,
+  ResumeThread,
+  GetThreadContext,
+  SetThreadContext,
+  writeContext,
+  writeBreakpointRegisters,
+  CONTEXT_FLAGS,
+  IS_ARM64_WINDOWS,
+} from './Win32Debug';
+import { CloseHandle } from './Win32API';
 
 export interface Dr7Entry {
   drIndex: number;
@@ -146,15 +160,34 @@ export async function traceAccessShared(opts: {
   return hits;
 }
 
-/** Build the ActiveBreakpoint config + register it in the engine's map. */
-export function registerBreakpointShared(opts: {
+/**
+ * Shared setBreakpoint core: attach guard (injected per engine), DR
+ * allocation, register application, and config registration.
+ */
+export async function setBreakpointShared(opts: {
   pid: number;
   address: string;
-  drIndex: number;
   access: BreakpointAccess;
   size: BreakpointSize;
-}): { config: ActiveBreakpointLike; addressBigint: bigint } {
+  ensureAttached: (pid: number) => Promise<void>;
+  allocateDR: () => number;
+  applyToAllThreads: (
+    pid: number,
+    drIndex: number,
+    address: bigint,
+    access: BreakpointAccess,
+    size: BreakpointSize,
+    enable: boolean,
+  ) => void;
+  register: (config: ActiveBreakpointLike) => void;
+}): Promise<ActiveBreakpointLike> {
+  await opts.ensureAttached(opts.pid);
+
+  const drIndex = opts.allocateDR();
   const targetAddr = BigInt(opts.address.startsWith('0x') ? opts.address : `0x${opts.address}`);
+
+  opts.applyToAllThreads(opts.pid, drIndex, targetAddr, opts.access, opts.size, true);
+
   const config: ActiveBreakpointLike = {
     id: randomUUID(),
     pid: opts.pid,
@@ -162,10 +195,12 @@ export function registerBreakpointShared(opts: {
     access: opts.access,
     size: opts.size,
     enabled: true,
-    drIndex: opts.drIndex,
+    drIndex,
     hitCount: 0,
   };
-  return { config, addressBigint: targetAddr };
+
+  opts.register(config);
+  return config;
 }
 
 export interface ActiveBreakpointLike {
@@ -200,4 +235,74 @@ export function listBreakpointsShared(
     hitCount: bp.hitCount,
     lastHit: bp.lastHit,
   }));
+}
+
+/**
+ * Engine-agnostic applyDRToAllThreads adapter: binds the shared loop to one
+ * engine's DR7 rebuild callback. Both Win32 engines delegate through this so
+ * their wrapper bodies stay identical.
+ */
+export function makeApplyDRAdapter(
+  buildDr7Entries: (
+    pid: number,
+    drIndex: number,
+    access: BreakpointAccess,
+    size: BreakpointSize,
+    enable: boolean,
+  ) => Dr7Entry[],
+): (
+  pid: number,
+  drIndex: number,
+  address: bigint,
+  access: BreakpointAccess,
+  size: BreakpointSize,
+  enable: boolean,
+) => void {
+  return (pid, drIndex, address, access, size, enable) => {
+    applyDRToAllThreadsShared({
+      pid,
+      drIndex,
+      address,
+      access,
+      size,
+      enable,
+      enumerateThreads: EnumerateProcessThreads,
+      openThread: openThreadForDebug,
+      suspendThread: SuspendThread,
+      getThreadContext: (h, flags) => GetThreadContext(h, flags),
+      setThreadContext: SetThreadContext,
+      resumeThread: ResumeThread,
+      closeHandle: CloseHandle,
+      contextFlagsAll: CONTEXT_FLAGS.ALL,
+      writeContext,
+      writeRegisters: writeBreakpointRegisters,
+      isArm64Windows: IS_ARM64_WINDOWS,
+      buildDr7Entries: (idx, acc, sz, en) => buildDr7Entries(pid, idx, acc, sz, en),
+    });
+  };
+}
+
+/** Shared poll-window computation for waitForHit loops. */
+export function hitPollWindow(timeoutMs?: number): { timeout: number; deadline: number } {
+  const timeout = timeoutMs ?? BREAKPOINT_HIT_TIMEOUT_MS;
+  return { timeout, deadline: Date.now() + timeout };
+}
+
+/** Shared removeBreakpoint bookkeeping (delete → clearDR → free DR slot). */
+export function removeBreakpointShared(opts: {
+  id: string;
+  breakpoints: Map<string, ActiveBreakpointLike & { lastHit?: number }>;
+  clearDR: (pid: number, drIndex: number) => void;
+  drAllocation: boolean[];
+}): boolean {
+  const bp = opts.breakpoints.get(opts.id);
+  if (!bp) return false;
+
+  // Delete before clearDR so the DR7 rebuild in applyDRToAllThreads
+  // excludes this breakpoint — otherwise its DR bit stays enabled with
+  // a zeroed address, leaving a ghost breakpoint at 0.
+  opts.breakpoints.delete(opts.id);
+  opts.clearDR(bp.pid, bp.drIndex);
+  opts.drAllocation[bp.drIndex] = false;
+  return true;
 }

@@ -70,8 +70,6 @@ import {
   EnumerateProcessThreads,
   openThreadForDebug,
   parseContext,
-  writeContext,
-  writeBreakpointRegisters,
   CONTEXT_FLAGS,
   CONTEXT_SIZE,
   IS_ARM64_WINDOWS,
@@ -89,12 +87,14 @@ import { requireKoffi } from './koffi-loader';
 import { formatAddress } from './formatAddress';
 import { allocateDR as allocateDebugRegister } from './platform/utils';
 import {
-  applyDRToAllThreadsShared,
+  makeApplyDRAdapter,
   traceAccessShared,
   DR_ACCESS_MAP,
   type Dr7Entry,
-  registerBreakpointShared,
   listBreakpointsShared,
+  hitPollWindow,
+  setBreakpointShared,
+  removeBreakpointShared,
 } from './breakpoint-registers';
 
 // ── Shared memory layout ──
@@ -449,6 +449,11 @@ function buildShellcode(pSharedMem: bigint, pSetEvent: bigint): Buffer {
 }
 
 export class VehDebuggerEngine {
+  /** Engine-neutral alias so the shared setBreakpoint guard reads identically. */
+  private get attachedPids() {
+    return this.sessions;
+  }
+
   private breakpoints = new Map<string, ActiveBreakpoint>();
   private sessions = new Map<number, VehSession>();
   private drAllocation = [false, false, false, false];
@@ -633,52 +638,40 @@ export class VehDebuggerEngine {
     this.sessions.delete(pid);
   }
 
-  /** Set a hardware breakpoint using DR registers. */
+  /** Set a hardware breakpoint using an available DR register */
   async setBreakpoint(
     pid: number,
     address: string,
     access: BreakpointAccess,
     size: BreakpointSize = 4,
   ): Promise<BreakpointConfig> {
-    if (!this.sessions.has(pid)) {
-      await this.attach(pid);
-    }
-
-    const drIndex = this.allocateDR();
-    const { config, addressBigint: targetAddr } = registerBreakpointShared({
+    return (await setBreakpointShared({
       pid,
       address,
-      drIndex,
       access,
       size,
-    });
-
-    this.applyDRToAllThreads(pid, drIndex, targetAddr, access, size, true);
-
-    this.breakpoints.set(config.id, config);
-    return config;
+      ensureAttached: async (p) => {
+        if (!this.attachedPids.has(p)) await this.attach(p);
+      },
+      allocateDR: () => this.allocateDR(),
+      applyToAllThreads: (p, idx, addr, acc, sz, en) =>
+        this.applyDRToAllThreads(p, idx, addr, acc, sz, en),
+      register: (config) => this.breakpoints.set(config.id, config),
+    })) as BreakpointConfig;
   }
 
-  /** Remove a breakpoint. */
+  /** Remove a hardware breakpoint */
   async removeBreakpoint(id: string): Promise<boolean> {
-    const bp = this.breakpoints.get(id);
-    if (!bp) return false;
-
-    this.breakpoints.delete(id);
-    this.clearDR(bp.pid, bp.drIndex);
-    this.drAllocation[bp.drIndex] = false;
-    return true;
+    return removeBreakpointShared({
+      id,
+      breakpoints: this.breakpoints,
+      clearDR: (pid, drIndex) => this.clearDR(pid, drIndex),
+      drAllocation: this.drAllocation,
+    });
   }
 
-  /** List all active breakpoints. */
-  listBreakpoints(): BreakpointListEntry[] {
-    return listBreakpointsShared(this.breakpoints.values());
-  }
-
-  /** Poll shared-memory event for breakpoint hits. */
+  /** Wait for a breakpoint hit */
   async waitForHit(timeoutMs?: number): Promise<BreakpointHit | null> {
-    const timeout = timeoutMs ?? BREAKPOINT_HIT_TIMEOUT_MS;
-    const deadline = Date.now() + timeout;
     const kernel32 = requireKoffi().load('kernel32.dll');
     const waitForMultipleObjects = kernel32.func(
       'uint32 WaitForMultipleObjects(uint32, void **, int, uint32)',
@@ -687,6 +680,8 @@ export class VehDebuggerEngine {
 
     const sessions = Array.from(this.sessions.values());
     if (sessions.length === 0) return null;
+
+    const deadline = hitPollWindow(timeoutMs).deadline;
 
     while (Date.now() < deadline) {
       const remaining = Math.max(100, deadline - Date.now());
@@ -847,54 +842,31 @@ export class VehDebuggerEngine {
     }
   }
 
-  private applyDRToAllThreads(
-    pid: number,
-    drIndex: number,
-    address: bigint,
-    access: BreakpointAccess,
-    size: BreakpointSize,
-    enable: boolean,
-  ): void {
-    applyDRToAllThreadsShared({
-      pid,
-      drIndex,
-      address,
-      access,
-      size,
-      enable,
-      enumerateThreads: EnumerateProcessThreads,
-      openThread: openThreadForDebug,
-      suspendThread: SuspendThread,
-      getThreadContext: (h, flags) => GetThreadContext(h, flags),
-      setThreadContext: SetThreadContext,
-      resumeThread: ResumeThread,
-      closeHandle: CloseHandle,
-      contextFlagsAll: CONTEXT_FLAGS.ALL,
-      writeContext,
-      writeRegisters: writeBreakpointRegisters,
-      isArm64Windows: IS_ARM64_WINDOWS,
-      // Arch-aware debug-register write (AMD64: DR0-3+DR7; ARM64: Wvr/Wcr).
-      buildDr7Entries: (idx, acc, sz, en) => {
-        const entries: Dr7Entry[] = Array.from(this.breakpoints.values())
-          .filter((bp) => bp.enabled && bp.pid === pid)
-          .map((bp) => ({
-            drIndex: bp.drIndex,
-            enabled: true,
-            access: DR_ACCESS_MAP[bp.access],
-            size: bp.size,
-          }));
+  // DR7 is rebuilt from this engine's active breakpoints for this pid only —
+  // including other pids' breakpoints would pollute this process's debug state.
+  private readonly applyDRToAllThreads = makeApplyDRAdapter((pid, idx, acc, sz, en) => {
+    const entries: Dr7Entry[] = Array.from(this.breakpoints.values())
+      .filter((bp) => bp.enabled && bp.pid === pid)
+      .map((bp) => ({
+        drIndex: bp.drIndex,
+        enabled: true,
+        access: DR_ACCESS_MAP[bp.access],
+        size: bp.size,
+      }));
 
-        if (en) {
-          entries.push({ drIndex: idx, enabled: true, access: DR_ACCESS_MAP[acc], size: sz });
-        }
-        return entries;
-      },
-    });
-  }
+    if (en) {
+      entries.push({ drIndex: idx, enabled: true, access: DR_ACCESS_MAP[acc], size: sz });
+    }
+    return entries;
+  });
 
   private clearDR(pid: number, drIndex: number): void {
     const dummyAccess: BreakpointAccess = 'write';
     this.applyDRToAllThreads(pid, drIndex, 0n, dummyAccess, 1, false);
+  }
+  /** List all active breakpoints */
+  listBreakpoints(): BreakpointListEntry[] {
+    return listBreakpointsShared(this.breakpoints.values());
   }
 }
 
