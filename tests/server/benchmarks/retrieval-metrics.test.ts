@@ -41,7 +41,10 @@ vi.mock('@server/ToolCatalog', () => ({
   getToolDomain: state.getToolDomain,
 }));
 
-vi.mock('@src/constants', () => ({
+vi.mock('@src/constants', async (importOriginal) => ({
+  // Real values for every constant the engine reads beyond the overrides below, so
+  // upstream additions to @src/constants never break this benchmark.
+  ...(await importOriginal<Record<string, unknown>>()),
   SEARCH_AFFINITY_BOOST_FACTOR: 0.15,
   SEARCH_AFFINITY_TOP_N: 5,
   SEARCH_DOMAIN_HUB_THRESHOLD: 3,
