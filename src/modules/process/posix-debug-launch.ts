@@ -153,3 +153,63 @@ export async function checkDebugPortPosix(
     return null;
   }
 }
+
+/**
+ * Shared findChromeProcesses classification: enumerate chrome processes and
+ * bucket them into renderer/utility/gpu/main from the command line. The
+ * platform managers only differ in how they resolve the target window.
+ */
+import type { WindowInfo } from '@modules/process/ProcessManager.types';
+
+export interface ChromeProcessCore {
+  mainProcess?: ProcessInfo;
+  rendererProcesses: ProcessInfo[];
+  gpuProcess?: ProcessInfo;
+  utilityProcesses: ProcessInfo[];
+  targetWindow?: WindowInfo;
+}
+
+export async function findChromeProcessesPosix(
+  findProcesses: (pattern: string) => Promise<ProcessInfo[]>,
+  getProcessByPid: (pid: number) => Promise<ProcessInfo | null>,
+): Promise<ChromeProcessCore> {
+  const result: ChromeProcessCore = {
+    rendererProcesses: [],
+    utilityProcesses: [],
+  };
+
+  try {
+    const processes = await findProcesses('chrome');
+
+    // Batch-fetch detailed info to avoid N+1 sequential exec calls
+    const detailedInfos = await Promise.all(processes.map((proc) => getProcessByPid(proc.pid)));
+
+    for (let i = 0; i < processes.length; i++) {
+      const proc = processes[i];
+      const detailedInfo = detailedInfos[i];
+
+      if (detailedInfo?.commandLine) {
+        const cmd = detailedInfo.commandLine.toLowerCase();
+
+        if (cmd.includes('--type=renderer')) {
+          result.rendererProcesses.push({ ...proc, ...detailedInfo });
+        } else if (cmd.includes('--type=gpu-process')) {
+          result.gpuProcess = { ...proc, ...detailedInfo };
+        } else if (cmd.includes('--type=utility')) {
+          result.utilityProcesses.push({ ...proc, ...detailedInfo });
+        } else if (!cmd.includes('--type=')) {
+          result.mainProcess = { ...proc, ...detailedInfo };
+        }
+      } else {
+        if (!result.mainProcess) {
+          result.mainProcess = proc;
+        }
+      }
+    }
+
+    return result;
+  } catch (error) {
+    logger.error('Failed to find Chrome processes:', error);
+    return result;
+  }
+}

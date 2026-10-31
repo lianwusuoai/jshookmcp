@@ -11,6 +11,7 @@ import { logger } from '@utils/logger';
 import { DEFAULT_DEBUG_PORT } from '@src/constants';
 import {
   checkDebugPortPosix,
+  findChromeProcessesPosix,
   findProcessesPosix,
   launchWithDebugPosix,
 } from '@modules/process/posix-debug-launch';
@@ -231,43 +232,15 @@ export class LinuxProcessManager {
    * Find Chrome/Chromium processes
    */
   async findChromeProcesses(): Promise<ChromeProcess> {
-    const result: ChromeProcess = {
-      rendererProcesses: [],
-      utilityProcesses: [],
-    };
-
+    // Shared enumeration/classification; platform-specific target-window pick.
+    const result = await findChromeProcessesPosix(
+      (pattern) => this.findProcesses(pattern),
+      (pid) => this.getProcessByPid(pid),
+    );
+    // Find target window: scan the main process plus renderers for a
+    // Chrome/Chromium titled window. Window enumeration is best-effort —
+    // a failure here must not lose the classified process list.
     try {
-      const processes = await this.findProcesses('chrome');
-
-      // Batch-fetch detailed info to avoid N+1 sequential exec calls
-      const detailedInfos = await Promise.all(
-        processes.map((proc) => this.getProcessByPid(proc.pid)),
-      );
-
-      for (let i = 0; i < processes.length; i++) {
-        const proc = processes[i];
-        const detailedInfo = detailedInfos[i];
-
-        if (detailedInfo?.commandLine) {
-          const cmd = detailedInfo.commandLine.toLowerCase();
-
-          if (cmd.includes('--type=renderer')) {
-            result.rendererProcesses.push({ ...proc, ...detailedInfo });
-          } else if (cmd.includes('--type=gpu-process')) {
-            result.gpuProcess = { ...proc, ...detailedInfo };
-          } else if (cmd.includes('--type=utility')) {
-            result.utilityProcesses.push({ ...proc, ...detailedInfo });
-          } else if (!cmd.includes('--type=')) {
-            result.mainProcess = { ...proc, ...detailedInfo };
-          }
-        } else {
-          if (!result.mainProcess) {
-            result.mainProcess = proc;
-          }
-        }
-      }
-
-      // Find target window
       const allPids = [
         result.mainProcess?.pid,
         ...result.rendererProcesses.map((p) => p.pid),
@@ -287,18 +260,16 @@ export class LinuxProcessManager {
           break;
         }
       }
-
-      logger.info('Chrome processes found:', {
-        main: result.mainProcess?.pid,
-        renderers: result.rendererProcesses.length,
-        hasTargetWindow: !!result.targetWindow,
-      });
-
-      return result;
     } catch (error) {
-      logger.error('Failed to find Chrome processes:', error);
-      return result;
+      logger.error('Failed to resolve Chrome target window:', error);
     }
+    logger.info('Chrome processes found:', {
+      main: result.mainProcess?.pid,
+      renderers: result.rendererProcesses.length,
+      hasTargetWindow: !!result.targetWindow,
+    });
+
+    return result;
   }
 
   /**

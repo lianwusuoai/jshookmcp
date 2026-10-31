@@ -16,6 +16,7 @@ import {
 import { ScriptLoader } from '@native/ScriptLoader';
 import {
   checkDebugPortPosix,
+  findChromeProcessesPosix,
   findProcessesPosix,
   launchWithDebugPosix,
 } from '@modules/process/posix-debug-launch';
@@ -247,61 +248,24 @@ export class MacProcessManager {
    * Find Chrome/Chromium processes
    */
   async findChromeProcesses(): Promise<ChromeProcess> {
-    const result: ChromeProcess = {
-      rendererProcesses: [],
-      utilityProcesses: [],
-    };
-
-    try {
-      const processes = await this.findProcesses('chrome');
-
-      // Batch-fetch detailed info to avoid N+1 sequential exec calls
-      const detailedInfos = await Promise.all(
-        processes.map((proc) => this.getProcessByPid(proc.pid)),
-      );
-
-      for (let i = 0; i < processes.length; i++) {
-        const proc = processes[i];
-        const detailedInfo = detailedInfos[i];
-
-        if (detailedInfo?.commandLine) {
-          const cmd = detailedInfo.commandLine.toLowerCase();
-
-          if (cmd.includes('--type=renderer')) {
-            result.rendererProcesses.push({ ...proc, ...detailedInfo });
-          } else if (cmd.includes('--type=gpu-process')) {
-            result.gpuProcess = { ...proc, ...detailedInfo };
-          } else if (cmd.includes('--type=utility')) {
-            result.utilityProcesses.push({ ...proc, ...detailedInfo });
-          } else if (!cmd.includes('--type=')) {
-            result.mainProcess = { ...proc, ...detailedInfo };
-          }
-        } else {
-          if (!result.mainProcess) {
-            result.mainProcess = proc;
-          }
-        }
+    // Shared enumeration/classification; platform-specific target-window pick.
+    const result = await findChromeProcessesPosix(
+      (pattern) => this.findProcesses(pattern),
+      (pid) => this.getProcessByPid(pid),
+    );
+    if (result.mainProcess) {
+      const windows = await this.getProcessWindowsCG(result.mainProcess.pid);
+      if (windows.length > 0) {
+        result.targetWindow = windows[0];
       }
-
-      // Find target window
-      if (result.mainProcess) {
-        const windows = await this.getProcessWindowsCG(result.mainProcess.pid);
-        if (windows.length > 0) {
-          result.targetWindow = windows[0];
-        }
-      }
-
-      logger.info('Chrome processes found:', {
-        main: result.mainProcess?.pid,
-        renderers: result.rendererProcesses.length,
-        hasTargetWindow: !!result.targetWindow,
-      });
-
-      return result;
-    } catch (error) {
-      logger.error('Failed to find Chrome processes:', error);
-      return result;
     }
+    logger.info('Chrome processes found:', {
+      main: result.mainProcess?.pid,
+      renderers: result.rendererProcesses.length,
+      hasTargetWindow: !!result.targetWindow,
+    });
+
+    return result;
   }
 
   /**
