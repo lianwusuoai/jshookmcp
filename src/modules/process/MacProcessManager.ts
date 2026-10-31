@@ -5,20 +5,18 @@
  * Supports: Chrome/Chromium, general macOS processes
  */
 
-import { exec, execFile, spawn } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from '@utils/logger';
 import {
   DEBUG_PORT_CANDIDATES,
   DEFAULT_DEBUG_PORT,
   PROCESS_LIST_MAX_BUFFER_BYTES,
-  PROCESS_LAUNCH_WAIT_MS,
   EXTERNAL_TOOL_PROBE_TIMEOUT_MS,
   NATIVE_ADMIN_CHECK_TIMEOUT_MS,
 } from '@src/constants';
 import { ScriptLoader } from '@native/ScriptLoader';
-import { ProcessRegistry } from '@utils/ProcessRegistry';
-import { buildChromiumDebugLaunch } from '@modules/process/chromium-launch';
+import { launchWithDebugPosix } from '@modules/process/posix-debug-launch';
 import type { ProcessInfo, WindowInfo } from '@modules/process/ProcessManager';
 
 const execAsync = promisify(exec);
@@ -405,51 +403,21 @@ export class MacProcessManager {
   }
 
   /**
-   * Launch process with debugging enabled
+   * Launch process with debugging enabled.
+   * Shared POSIX implementation (see posix-debug-launch.ts) — the two platform
+   * managers only differ in how they resolve a PID to ProcessInfo.
    */
   async launchWithDebug(
     executablePath: string,
     debugPort: number = DEFAULT_DEBUG_PORT,
     args: string[] = [],
   ): Promise<ProcessInfo | null> {
-    try {
-      const plan = buildChromiumDebugLaunch(executablePath, debugPort, args);
-
-      const child = spawn(executablePath, plan.debugArgs, {
-        detached: true,
-        stdio: 'ignore',
-      });
-
-      child.unref();
-      ProcessRegistry.register(child);
-
-      await new Promise((resolve) => setTimeout(resolve, PROCESS_LAUNCH_WAIT_MS));
-
-      if (!child.pid) {
-        logger.error(`Failed to spawn process: PID is undefined for ${executablePath}`);
-        return null;
-      }
-      // Fast-fail (issue #206): a target that died immediately must not be
-      // reported as a live debuggable process.
-      if (typeof child.exitCode === 'number' || typeof child.signalCode === 'string') {
-        logger.error(`Debug launch target exited immediately: ${executablePath}`, {
-          exitCode: child.exitCode,
-          signalCode: child.signalCode,
-        });
-        return null;
-      }
-      const process = await this.getProcessByPid(child.pid);
-
-      logger.info(`Launched process with debug port ${debugPort}:`, {
-        pid: child.pid,
-        executable: executablePath,
-      });
-
-      return process;
-    } catch (error) {
-      logger.error('Failed to launch process with debug:', error);
-      return null;
-    }
+    return launchWithDebugPosix(
+      executablePath,
+      (pid) => this.getProcessByPid(pid),
+      debugPort,
+      args,
+    );
   }
 
   /**
