@@ -11,13 +11,7 @@ import * as net from 'node:net';
 import * as tls from 'node:tls';
 import { BufferChain } from '@utils/BufferChain';
 
-import {
-  analyzeHttpResponse,
-  buildHttpRequest,
-  isLikelyTextHttpBody,
-} from '@server/domains/network/http-raw';
-import { buildHttp2Frame } from '@server/domains/network/http2-raw';
-import type { Http2FrameBuildInput, Http2SettingsEntry } from '@server/domains/network/http2-raw';
+import { analyzeHttpResponse } from '@server/domains/network/http-raw';
 import {
   createNetworkAuthorizationPolicy,
   hasAuthorizedTargets,
@@ -30,6 +24,8 @@ import {
   type NetworkAuthorizationInput,
   type ResolvedNetworkTarget,
 } from '@utils/network/ssrf-policy';
+
+export { HTTP_TOKEN_RE };
 
 const HTTP_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
@@ -120,19 +116,6 @@ export function parseNetworkAuthorization(
   return authorization;
 }
 
-export { HTTP_TOKEN_RE };
-export { analyzeHttpResponse, buildHttpRequest, isLikelyTextHttpBody, buildHttp2Frame };
-export type { Http2FrameBuildInput, Http2SettingsEntry };
-export {
-  createNetworkAuthorizationPolicy,
-  hasAuthorizedTargets,
-  isAuthorizedNetworkTarget,
-  isLocalSsrfBypassEnabled,
-  isLoopbackHost,
-  isNetworkAuthorizationExpired,
-  isPrivateHost,
-  resolveNetworkTarget,
-};
 export type { NetworkAuthorizationInput, ResolvedNetworkTarget };
 
 export function clamp(value: number, min: number, max: number): number {
