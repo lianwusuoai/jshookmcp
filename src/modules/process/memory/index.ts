@@ -8,11 +8,8 @@ export type {
   MemoryReadResult,
   MemoryWriteResult,
   MemoryScanResult,
-  MemoryRegion,
   MemoryProtectionInfo,
-  ModuleInfo,
   MemoryPatch,
-  MemoryMonitorEntry,
 } from '@modules/process/memory/types';
 
 export { readMemory } from '@modules/process/memory/reader';

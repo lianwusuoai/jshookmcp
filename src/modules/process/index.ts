@@ -5,12 +5,7 @@
  */
 
 // Re-export types
-export type {
-  ProcessInfo,
-  WindowInfo,
-  ChromiumProcess,
-  TargetAppConfig,
-} from '@modules/process/ProcessManager';
+export type { ProcessInfo, WindowInfo } from '@modules/process/ProcessManager';
 export { DEFAULT_CHROMIUM_CONFIG } from '@modules/process/ProcessManager';
 export type { ChromeProcess as LinuxChromeProcess } from '@modules/process/LinuxProcessManager';
 export type { ChromeProcess as MacChromeProcess } from '@modules/process/MacProcessManager';
@@ -21,12 +16,7 @@ export { LinuxProcessManager } from '@modules/process/LinuxProcessManager';
 export { MacProcessManager } from '@modules/process/MacProcessManager';
 
 // Export Memory Manager
-export {
-  MemoryManager,
-  type MemoryReadResult,
-  type MemoryWriteResult,
-  type MemoryScanResult,
-} from '@modules/process/MemoryManager';
+export { MemoryManager } from '@modules/process/MemoryManager';
 
 // Export utility functions for advanced memory operations
 export {
@@ -49,5 +39,4 @@ export {
   detectPlatform,
   isProcessManagementSupported,
   UnifiedProcessManager,
-  type Platform,
 } from '@modules/process/UnifiedProcessManager';

@@ -1,4 +1,4 @@
-export { ByovdManager, byovdManager } from './ByovdManager';
+export { byovdManager } from './ByovdManager';
 export * from './types';
 export { byovdDriverRegistry } from './drivers';
 export { KernelCallbackManager } from './KernelCallbackManager';

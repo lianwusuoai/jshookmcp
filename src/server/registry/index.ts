@@ -162,7 +162,6 @@ export async function ensureAllDomainsLoaded(eventBus?: EventBus<ServerEventMap>
 export {
   getLoadedManifests as getAllManifests,
   getLoadedRegistrations as getAllRegistrations,
-  onRegistryInvalidate,
 } from '@server/registry/state';
 export { getLoadedDomainNames as getAllDomains } from '@server/registry/views';
 
@@ -184,8 +183,6 @@ export function getAllToolNames(): ReadonlySet<string> {
 export {
   buildAllTools,
   buildHandlerMapFromRegistry,
-  buildToolDomainMap,
-  buildToolGroups,
   getRegistrationByName,
 } from '@server/registry/views';
 export { buildProfileDomains } from '@server/registry/profiles';

@@ -10,10 +10,6 @@ export { resolveNtdll, resetNtdllCache, resolveRuntimeKernelBase } from './Sysca
 export type { SyscallEntry } from './SyscallResolver';
 export { createScanWalker } from './ScanObfuscator';
 
-export {
-  ntAllocateVirtualMemory as ntAllocVM,
-  ntProtectVirtualMemory as ntProtectVM,
-} from './NtInjection';
 export { enumerateKernelModules, findKernelModule } from './NtModuleEnumerator';
 
 // ── InProcessPatcher ─────────────────────────────────────────────────────────

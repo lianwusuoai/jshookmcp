@@ -2,4 +2,3 @@
 // the NativeBridgeHandlers type without a cycle through this barrel.
 export * from './definitions';
 export { NativeBridgeHandlers } from './handlers.impl';
-export { default } from './manifest';
