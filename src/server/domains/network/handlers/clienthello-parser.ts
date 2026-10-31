@@ -328,12 +328,20 @@ export function computeJa3(parsed: ParsedClientHello): { ja3: string; ja3_raw: s
   if (!parsed.valid || !parsed.ciphers || !parsed.extensions) {
     throw new Error(`cannot compute JA3 from invalid ClientHello: ${parsed.error ?? 'unknown'}`);
   }
-  const version = parsed.legacyVersion ?? '0303';
-  const ciphers = stripGrease(parsed.ciphers).join('-');
-  const extensions = stripGrease(parsed.extensions.map((e) => e.type)).join('-');
-  const ecpf = stripGrease(parsed.ecPointFormats).join('-');
-  const ec = stripGrease(parsed.ellipticCurves).join('-');
-  const raw = `${version},${ciphers},${extensions},${ecpf},${ec}`;
+  // JA3 string, per the Salesforce spec, is five comma-separated fields of DECIMAL
+  // values in this exact order: TLSVersion,Ciphers,Extensions,EllipticCurves,
+  // EllipticCurvePointFormats. Emitting hex (or swapping the last two fields) makes
+  // the pre-hash string unmatchable against published JA3 datasets (ja3er, Censys).
+  const toDecList = (values: string[] | undefined): string =>
+    stripGrease(values)
+      .map((v) => String(parseInt(v, 16)))
+      .join('-');
+  const version = String(parseInt(parsed.legacyVersion ?? '0303', 16));
+  const ciphers = toDecList(parsed.ciphers);
+  const extensions = toDecList(parsed.extensions.map((e) => e.type));
+  const ec = toDecList(parsed.ellipticCurves);
+  const ecpf = toDecList(parsed.ecPointFormats);
+  const raw = `${version},${ciphers},${extensions},${ec},${ecpf}`;
   // CodeQL flags this as js/weak-cryptographic-algorithm (MD5 keyed by "sensitive" sessionId
   // data). Intentional and required by the JA3 specification (Salesforce format): JA3 is DEFINED
   // as the MD5 digest of the pre-hash string above. The MD5 output is a public, comparable

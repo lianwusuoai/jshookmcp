@@ -237,8 +237,8 @@ describe('clienthello-parser — computeJa3', () => {
     );
 
     const ja3 = computeJa3(parsed);
-    // JA3 raw format: version,ciphers,extensions,ec_point_formats,elliptic_curves (GREASE removed)
-    expect(ja3.ja3_raw).toBe('0303,1301-1302-1303-c02b-c02f,0000-000b-000a-000d-0010,00,001d-0017');
+    // JA3 raw format per Salesforce spec: version,ciphers,extensions,elliptic_curves,ec_point_formats (decimal, GREASE removed)
+    expect(ja3.ja3_raw).toBe('771,4865-4866-4867-49195-49199,0-11-10-13-16,29-23,0');
     // ja3 is the MD5 hex digest (32 lowercase hex chars)
     expect(ja3.ja3).toMatch(/^[0-9a-f]{32}$/);
   });
@@ -255,7 +255,7 @@ describe('clienthello-parser — computeJa3', () => {
     );
     const ja3 = computeJa3(parsed);
     // GREASE cipher 0a0a/1a1a removed, GREASE ext 8a8a removed
-    expect(ja3.ja3_raw).toBe('0303,1301,000a,,001d');
+    expect(ja3.ja3_raw).toBe('771,4865,10,29,');
   });
 
   it('leaves empty segments when no elliptic_curves / ec_point_formats', () => {
@@ -266,8 +266,8 @@ describe('clienthello-parser — computeJa3', () => {
       }),
     );
     const ja3 = computeJa3(parsed);
-    // version,ciphers,extensions,ec_point_formats(empty),elliptic_curves(empty)
-    expect(ja3.ja3_raw).toBe('0303,1301,,,');
+    // version,ciphers,extensions,elliptic_curves(empty),ec_point_formats(empty)
+    expect(ja3.ja3_raw).toBe('771,4865,,,');
   });
 
   it('uses TLS 1.3 (0304) version when supported_versions present', () => {
@@ -280,7 +280,7 @@ describe('clienthello-parser — computeJa3', () => {
     );
     // JA3 uses the legacy version field (0303) per Salesforce spec — supported_versions does NOT change JA3 version
     const ja3 = computeJa3(parsed);
-    expect(ja3.ja3_raw.startsWith('0303,')).toBe(true);
+    expect(ja3.ja3_raw.startsWith('771,')).toBe(true);
   });
 
   it('JA3 hash is deterministic (same input → same hash)', () => {
