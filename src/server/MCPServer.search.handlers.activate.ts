@@ -135,9 +135,10 @@ export async function activateToolNames(
   ctx: MCPServerContext,
   names: string[],
 ): Promise<ActivationSummary> {
-  // Dynamic import keeps the module graph acyclic: search.ts registers the
-  // handlers defined in this module, so a static import would form a cycle.
-  const { META_TOOL_NAMES } = await import('@server/MCPServer.search');
+  // Leaf names module: static-safe here, kept as a plain await for symmetry
+  // with the barrel's dynamic imports (search.ts registers the handlers
+  // defined in this module, so a barrel import would form a cycle).
+  const { META_TOOL_NAMES } = await import('@server/MCPServer.search.meta-names');
   const activeNames = getActiveToolNames(ctx);
   const activated: string[] = [];
   const alreadyActive: string[] = [];

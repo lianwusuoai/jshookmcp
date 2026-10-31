@@ -103,6 +103,7 @@ vi.mock('@server/ToolRouter.probe', () => ({
 }));
 
 import { handleCallTool } from '@server/MCPServer.search.handlers.call';
+import { getMetaToolHandler } from '@server/MCPServer.search';
 import { ToolCallContextGuard } from '@server/ToolCallContextGuard';
 
 function createCtx(overrides: Record<string, unknown> = {}) {
@@ -141,7 +142,7 @@ describe('MCPServer.search.handlers.call', () => {
 
   it('returns error when name is not provided', async () => {
     const ctx = createCtx();
-    const response = await handleCallTool(ctx, {});
+    const response = await handleCallTool(ctx, {}, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -152,7 +153,7 @@ describe('MCPServer.search.handlers.call', () => {
 
   it('returns error when name is empty string', async () => {
     const ctx = createCtx();
-    const response = await handleCallTool(ctx, { name: '' });
+    const response = await handleCallTool(ctx, { name: '' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -161,7 +162,7 @@ describe('MCPServer.search.handlers.call', () => {
 
   it('returns error when name is not a string', async () => {
     const ctx = createCtx();
-    const response = await handleCallTool(ctx, { name: 123 });
+    const response = await handleCallTool(ctx, { name: 123 }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -171,7 +172,11 @@ describe('MCPServer.search.handlers.call', () => {
   it('executes tool directly when already in router', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, { name: 'test_tool', args: { key: 'value' } });
+    const response = await handleCallTool(
+      ctx,
+      { name: 'test_tool', args: { key: 'value' } },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.result).toBe('ok');
@@ -182,7 +187,7 @@ describe('MCPServer.search.handlers.call', () => {
   it('normalizes tool names via normalizeToolName', async () => {
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'mcp__jshook__test_tool' });
+    await handleCallTool(ctx, { name: 'mcp__jshook__test_tool' }, { getMetaToolHandler });
 
     expect(state.normalizeToolName).toHaveBeenCalledWith('mcp__jshook__test_tool');
     expect(ctx.router.has).toHaveBeenCalledWith('test_tool');
@@ -191,7 +196,7 @@ describe('MCPServer.search.handlers.call', () => {
   it('uses empty object when args is not an object', async () => {
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'test_tool', args: 'not-an-object' });
+    await handleCallTool(ctx, { name: 'test_tool', args: 'not-an-object' }, { getMetaToolHandler });
 
     expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
   });
@@ -207,10 +212,14 @@ describe('MCPServer.search.handlers.call', () => {
     });
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'test_tool',
-      args: { url: 'https://example.com', count: '5' },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'test_tool',
+        args: { url: 'https://example.com', count: '5' },
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.result).toBe('ok');
@@ -230,10 +239,14 @@ describe('MCPServer.search.handlers.call', () => {
     });
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'test_tool',
-      args: {},
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'test_tool',
+        args: {},
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -245,7 +258,7 @@ describe('MCPServer.search.handlers.call', () => {
   it('uses empty object when args is an array', async () => {
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'test_tool', args: [1, 2] });
+    await handleCallTool(ctx, { name: 'test_tool', args: [1, 2] }, { getMetaToolHandler });
 
     expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
   });
@@ -253,7 +266,7 @@ describe('MCPServer.search.handlers.call', () => {
   it('uses empty object when args is not provided', async () => {
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'test_tool' });
+    await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
     expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', {});
   });
@@ -261,10 +274,14 @@ describe('MCPServer.search.handlers.call', () => {
   it('parses JSON arguments wrapper', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'test_tool',
-      arguments: '{"key": "value"}',
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'test_tool',
+        arguments: '{"key": "value"}',
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.result).toBe('ok');
@@ -274,7 +291,11 @@ describe('MCPServer.search.handlers.call', () => {
   it('accepts an object-valued arguments wrapper', async () => {
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'test_tool', arguments: { key: 'value' } });
+    await handleCallTool(
+      ctx,
+      { name: 'test_tool', arguments: { key: 'value' } },
+      { getMetaToolHandler },
+    );
 
     expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('test_tool', { key: 'value' });
   });
@@ -282,7 +303,11 @@ describe('MCPServer.search.handlers.call', () => {
   it('reports an empty arguments string instead of silently dropping it', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, { name: 'test_tool', arguments: '' });
+    const response = await handleCallTool(
+      ctx,
+      { name: 'test_tool', arguments: '' },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -293,7 +318,11 @@ describe('MCPServer.search.handlers.call', () => {
   it('reports malformed arguments JSON instead of silently dropping it', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, { name: 'test_tool', arguments: '{broken' });
+    const response = await handleCallTool(
+      ctx,
+      { name: 'test_tool', arguments: '{broken' },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -304,7 +333,11 @@ describe('MCPServer.search.handlers.call', () => {
   it('reports arguments JSON that is not an object', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, { name: 'test_tool', arguments: '123' });
+    const response = await handleCallTool(
+      ctx,
+      { name: 'test_tool', arguments: '123' },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -321,7 +354,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -338,7 +371,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: 'binary_decod' });
+    const response = await handleCallTool(ctx, { name: 'binary_decod' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -355,7 +388,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -373,7 +406,7 @@ describe('MCPServer.search.handlers.call', () => {
       enabledDomains: new Set(['encoding']),
     });
 
-    const response = await handleCallTool(ctx, { name: 'binary_decode' });
+    const response = await handleCallTool(ctx, { name: 'binary_decode' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -402,7 +435,11 @@ describe('MCPServer.search.handlers.call', () => {
       enabledDomains: new Set<string>(),
     });
 
-    const response = await handleCallTool(ctx, { name: 'binary_decode', args: {} });
+    const response = await handleCallTool(
+      ctx,
+      { name: 'binary_decode', args: {} },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -421,7 +458,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: 'some_fancy_tool' });
+    const response = await handleCallTool(ctx, { name: 'some_fancy_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -446,7 +483,7 @@ describe('MCPServer.search.handlers.call', () => {
       enabledDomains: new Set(['encoding']),
     });
 
-    const response = await handleCallTool(ctx, { name: 'binary_decode' });
+    const response = await handleCallTool(ctx, { name: 'binary_decode' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -467,7 +504,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: hostile });
+    const response = await handleCallTool(ctx, { name: hostile }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -482,7 +519,7 @@ describe('MCPServer.search.handlers.call', () => {
       router: { has: vi.fn(() => false) },
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -500,10 +537,14 @@ describe('MCPServer.search.handlers.call', () => {
     });
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'deactivate_tools',
-      args: { names: ['page_navigate'] },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'deactivate_tools',
+        args: { names: ['page_navigate'] },
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(state.handleDeactivateTools).toHaveBeenCalledTimes(1);
@@ -518,7 +559,7 @@ describe('MCPServer.search.handlers.call', () => {
   it('dispatches coverage_report to its meta handler and returns the summary', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, { name: 'coverage_report' });
+    const response = await handleCallTool(ctx, { name: 'coverage_report' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(state.ensureAllDomainsLoaded).toHaveBeenCalledTimes(1);
@@ -532,10 +573,14 @@ describe('MCPServer.search.handlers.call', () => {
   it('returns an error instead of recursing when call_tool targets itself', async () => {
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'call_tool',
-      args: { name: 'deactivate_tools' },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'call_tool',
+        args: { name: 'deactivate_tools' },
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -548,10 +593,14 @@ describe('MCPServer.search.handlers.call', () => {
     state.handleDeactivateTools.mockRejectedValue(new Error('deactivate boom'));
     const ctx = createCtx();
 
-    const response = await handleCallTool(ctx, {
-      name: 'deactivate_tools',
-      args: { names: ['page_navigate'] },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'deactivate_tools',
+        args: { names: ['page_navigate'] },
+      },
+      { getMetaToolHandler },
+    );
 
     expect(response.isError).toBe(true);
     // Direct meta-tool failures return `Error: <message>` via asErrorResponse.
@@ -564,7 +613,7 @@ describe('MCPServer.search.handlers.call', () => {
     state.getSearchEngine.mockReturnValue({ recordToolCallFeedback });
     const ctx = createCtx();
 
-    await handleCallTool(ctx, { name: 'test_tool' });
+    await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
     // The call_tool proxy dispatches via executeToolWithTracking, which now
     // records search-engine feedback (vector weight + recency) for BOTH the
@@ -580,7 +629,7 @@ describe('MCPServer.search.handlers.call', () => {
       }),
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -595,7 +644,7 @@ describe('MCPServer.search.handlers.call', () => {
       }),
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
@@ -609,7 +658,7 @@ describe('MCPServer.search.handlers.call', () => {
       })),
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
     // Non-JSON text should be left unchanged
     // @ts-expect-error
@@ -623,7 +672,7 @@ describe('MCPServer.search.handlers.call', () => {
       })),
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
     // Array JSON should be left unchanged
     // @ts-expect-error
@@ -640,7 +689,7 @@ describe('MCPServer.search.handlers.call', () => {
       })),
     });
 
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
+    const response = await handleCallTool(ctx, { name: 'test_tool' }, { getMetaToolHandler });
 
     expect(response.content[0]).toEqual({ type: 'image', data: 'base64data' });
     // @ts-expect-error
@@ -661,10 +710,14 @@ describe('MCPServer.search.handlers.call', () => {
       content: [{ type: 'text', text: JSON.stringify({ success: true, deactivated: [] }) }],
     });
 
-    const response = await handleCallTool(ctx, {
-      name: 'deactivate_tools',
-      args: { names: ['page_navigate'] },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'deactivate_tools',
+        args: { names: ['page_navigate'] },
+      },
+      { getMetaToolHandler },
+    );
 
     expect(response.isError).toBe(true);
     const result = parseResponse(response);
@@ -687,16 +740,24 @@ describe('MCPServer.search.handlers.call', () => {
     const ctx = createCtx({ contextGuard: new ToolCallContextGuard(() => null) });
 
     for (let i = 0; i < 4; i++) {
-      const response = await handleCallTool(ctx, {
-        name: 'deactivate_tools',
-        args: { names: ['page_navigate'] },
-      });
+      const response = await handleCallTool(
+        ctx,
+        {
+          name: 'deactivate_tools',
+          args: { names: ['page_navigate'] },
+        },
+        { getMetaToolHandler },
+      );
       expect(response.isError).not.toBe(true);
     }
-    const blocked = await handleCallTool(ctx, {
-      name: 'deactivate_tools',
-      args: { names: ['page_navigate'] },
-    });
+    const blocked = await handleCallTool(
+      ctx,
+      {
+        name: 'deactivate_tools',
+        args: { names: ['page_navigate'] },
+      },
+      { getMetaToolHandler },
+    );
 
     expect(blocked.isError).toBe(true);
     const result = parseResponse(blocked);
@@ -715,10 +776,14 @@ describe('MCPServer.search.handlers.call', () => {
       },
     });
 
-    const response = await handleCallTool(ctx, {
-      name: 'call_tool',
-      args: { name: 'deactivate_tools' },
-    });
+    const response = await handleCallTool(
+      ctx,
+      {
+        name: 'call_tool',
+        args: { name: 'deactivate_tools' },
+      },
+      { getMetaToolHandler },
+    );
     const result = parseResponse(response);
 
     expect(result.success).toBe(false);
