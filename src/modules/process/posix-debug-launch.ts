@@ -1,6 +1,5 @@
 /**
- * Shared POSIX debug-launch implementation for LinuxProcessManager /
- * MacProcessManager.
+ * Shared POSIX process helpers for LinuxProcessManager / MacProcessManager.
  *
  * The two platform managers previously carried byte-identical 60-line
  * launchWithDebug bodies (fallow clone dup). Platform differences live in the
@@ -8,10 +7,20 @@
  */
 import { spawn } from 'node:child_process';
 import { logger } from '@utils/logger';
-import { DEFAULT_DEBUG_PORT, PROCESS_LAUNCH_WAIT_MS } from '@src/constants';
+import {
+  DEBUG_PORT_CANDIDATES,
+  DEFAULT_DEBUG_PORT,
+  PROCESS_LAUNCH_WAIT_MS,
+  PROCESS_LIST_MAX_BUFFER_BYTES,
+} from '@src/constants';
 import { buildChromiumDebugLaunch } from '@modules/process/chromium-launch';
 import { ProcessRegistry } from '@utils/ProcessRegistry';
 import type { ProcessInfo } from '@modules/process/ProcessManager.types';
+
+/** Shell-metacharacter strip shared by pattern searches. */
+export function sanitizePattern(s: string): string {
+  return String(s || '').replace(/[^\w\s.@/\-:,+]/g, '');
+}
 
 export async function launchWithDebugPosix(
   executablePath: string,
@@ -55,6 +64,92 @@ export async function launchWithDebugPosix(
     return process;
   } catch (error) {
     logger.error('Failed to launch process with debug:', error);
+    return null;
+  }
+}
+
+/** Shared `ps aux` pattern search — identical on Linux and macOS. */
+export async function findProcessesPosix(
+  pattern: string,
+  execAsync: (cmd: string, opts?: Record<string, unknown>) => Promise<{ stdout: string }>,
+): Promise<ProcessInfo[]> {
+  try {
+    const safePattern = sanitizePattern(pattern);
+    const { stdout } = await execAsync(`ps aux | grep -i "${safePattern}" | grep -v grep || true`, {
+      maxBuffer: PROCESS_LIST_MAX_BUFFER_BYTES,
+    });
+
+    const processes: ProcessInfo[] = [];
+    const lines = stdout
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim());
+
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 11) {
+        const pid = parseInt(parts[1] || '0', 10);
+        if (isNaN(pid)) continue; // skip header line
+        const cpu = parseFloat(parts[2] || '0');
+        const mem = parseFloat(parts[3] || '0');
+        const command = parts.slice(10).join(' ');
+
+        processes.push({
+          pid,
+          name: parts[10] || command.split(' ')[0] || 'unknown',
+          commandLine: command,
+          cpuUsage: cpu,
+          memoryUsage: mem * 1024 * 1024, // Estimated from %MEM (imprecise)
+        });
+      }
+    }
+
+    logger.info(`Found ${processes.length} processes matching '${pattern}'`);
+    return processes;
+  } catch (error) {
+    logger.error(`Failed to find processes with pattern '${pattern}':`, error);
+    return [];
+  }
+}
+
+/**
+ * Shared "which debug port does this PID listen on" scan. The platform
+ * managers differ only in (a) the listening-port command (ss/netstat vs lsof)
+ * and (b) how they read a process's command line (procfs vs ps); both are
+ * injected so the shared body carries the command-line flag match + port scan.
+ */
+export async function checkDebugPortPosix(
+  pid: number,
+  listPortsCommand: string,
+  safePidFn: (pid: number) => number,
+  execAsync: (cmd: string, opts?: Record<string, unknown>) => Promise<{ stdout: string }>,
+  getCommandLine: (pid: number) => Promise<string | undefined>,
+  options?: { commandLine?: string },
+): Promise<number | null> {
+  try {
+    pid = safePidFn(pid);
+    const commandLine = options?.commandLine ?? (await getCommandLine(pid));
+
+    if (commandLine) {
+      const match = commandLine.match(/--remote-debugging-port=(\d+)/);
+      if (match?.[1]) {
+        return parseInt(match[1], 10);
+      }
+    }
+
+    // Check listening ports for the process
+    const { stdout } = await execAsync(listPortsCommand, { maxBuffer: 1024 * 1024 });
+
+    // Common debug ports
+    for (const port of DEBUG_PORT_CANDIDATES) {
+      if (stdout.includes(`:${port}`)) {
+        return port;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    logger.error(`Failed to check debug port for PID ${pid}:`, error);
     return null;
   }
 }

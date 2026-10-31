@@ -8,21 +8,17 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from '@utils/logger';
+import { DEFAULT_DEBUG_PORT } from '@src/constants';
 import {
-  DEBUG_PORT_CANDIDATES,
-  DEFAULT_DEBUG_PORT,
-  PROCESS_LIST_MAX_BUFFER_BYTES,
-} from '@src/constants';
-import { launchWithDebugPosix } from '@modules/process/posix-debug-launch';
+  checkDebugPortPosix,
+  findProcessesPosix,
+  launchWithDebugPosix,
+} from '@modules/process/posix-debug-launch';
 import type { ProcessInfo, WindowInfo } from '@modules/process/ProcessManager';
 
 const execAsync = promisify(exec);
 
 /** Strip shell metacharacters from a grep pattern to prevent command injection. */
-function sanitizePattern(s: string): string {
-  return String(s || '').replace(/[^\w\s.@/\-:,+]/g, '');
-}
-
 /** Validate and normalize a PID value. Throws on invalid input. */
 function safePid(pid: number): number {
   const n = Math.trunc(Number(pid));
@@ -69,44 +65,7 @@ export class LinuxProcessManager {
    * Enumerate all processes matching a pattern
    */
   async findProcesses(pattern: string): Promise<ProcessInfo[]> {
-    try {
-      const safePattern = sanitizePattern(pattern);
-      const { stdout } = await execAsync(
-        `ps aux | grep -i "${safePattern}" | grep -v grep || true`,
-        { maxBuffer: PROCESS_LIST_MAX_BUFFER_BYTES },
-      );
-
-      const processes: ProcessInfo[] = [];
-      const lines = stdout
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim());
-
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 11) {
-          const pid = parseInt(parts[1] || '0', 10);
-          if (isNaN(pid)) continue; // skip header line
-          const cpu = parseFloat(parts[2] || '0');
-          const mem = parseFloat(parts[3] || '0');
-          const command = parts.slice(10).join(' ');
-
-          processes.push({
-            pid,
-            name: parts[10] || command.split(' ')[0] || 'unknown',
-            commandLine: command,
-            cpuUsage: cpu,
-            memoryUsage: mem * 1024 * 1024, // Estimated from %MEM (imprecise)
-          });
-        }
-      }
-
-      logger.info(`Found ${processes.length} processes matching '${pattern}'`);
-      return processes;
-    } catch (error) {
-      logger.error(`Failed to find processes with pattern '${pattern}':`, error);
-      return [];
-    }
+    return findProcessesPosix(pattern, execAsync);
   }
 
   /**
@@ -371,36 +330,17 @@ export class LinuxProcessManager {
    * Check if a process has a debug port enabled
    */
   async checkDebugPort(pid: number, options?: { commandLine?: string }): Promise<number | null> {
-    try {
-      pid = safePid(pid);
-      const commandLine =
-        options?.commandLine ?? (await this.getProcessCommandLine(pid)).commandLine;
-
-      if (commandLine) {
-        const match = commandLine.match(/--remote-debugging-port=(\d+)/);
-        if (match?.[1]) {
-          return parseInt(match[1], 10);
-        }
-      }
-
-      // Check listening ports for the process
-      const { stdout } = await execAsync(
-        `ss -tlnp 2>/dev/null | grep "pid=${pid}" || netstat -tlnp 2>/dev/null | grep "${pid}" || true`,
-        { maxBuffer: 1024 * 1024 },
-      );
-
-      // Common debug ports
-      for (const port of DEBUG_PORT_CANDIDATES) {
-        if (stdout.includes(`:${port}`)) {
-          return port;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      logger.error(`Failed to check debug port for PID ${pid}:`, error);
-      return null;
-    }
+    return checkDebugPortPosix(
+      pid,
+      `ss -tlnp 2>/dev/null | grep "pid=${pid}" || netstat -tlnp 2>/dev/null | grep "${pid}" || true`,
+      safePid,
+      execAsync,
+      async (p) => {
+        const { commandLine } = await this.getProcessCommandLine(p);
+        return commandLine;
+      },
+      options,
+    );
   }
 
   /**
